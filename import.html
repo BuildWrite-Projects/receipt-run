@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Receipt Run Move</title>
+<!-- One-time move of receipts from the old claude.ai Receipt Run into this one.
+     Pick the "Receipt Run_Move Bundle.json" file Claude made; it uploads the
+     photos and records under your own sign-in, then checks the counts.
+     Safe to run twice: everything is written by id, so nothing doubles up.
+     Delete this page once the move is confirmed. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="store.js"></script>
+<style>
+:root{--bg:#14161a;--surface:#1c1f25;--line:#333845;--fg:#ECEEF2;--muted:#99A2B1;--accent:#E8A33D;--accent-ink:#1A1205;--ok:#4FBF86;--danger:#E8604C;
+  --font-body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;--font-display:"Helvetica Neue",Arial,sans-serif;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--font-body);padding:24px 16px;max-width:640px;margin-inline:auto}
+h1{font-size:21px;margin:0 0 6px}
+p{color:var(--muted);margin:0 0 16px}
+label.pick{display:block;text-align:center;background:var(--accent);color:var(--accent-ink);font-weight:600;border-radius:11px;padding:14px;cursor:pointer}
+input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
+#log{margin-top:18px;font:13px/1.6 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:60px}
+.ok{color:var(--ok)}.bad{color:var(--danger)}
+</style>
+</head><body>
+<h1>Move receipts from the old app</h1>
+<p>Pick the <b>Receipt Run_Move Bundle.json</b> file. Your photos and records go into your own account, then the counts are checked against the old app.</p>
+<label class="pick" for="f" id="picklbl">Pick the move file</label>
+<input type="file" id="f" accept=".json,application/json">
+<div id="log">Signing in…</div>
+<script>
+(function(){
+  var log = document.getElementById('log');
+  function say(t, cls){ var s=document.createElement('div'); if(cls) s.className=cls; s.textContent=t; log.appendChild(s); }
+  var client = null, uid = null;
+  window.claude.use('user').then(function(u){ return u.id(); }).then(function(id){
+    uid = id; client = window.RR_client();
+    log.textContent = ''; say('Signed in. Ready for the file.');
+  }).catch(function(e){ log.textContent=''; say('Could not sign in: ' + (e && e.message), 'bad'); });
+
+  function b64ToBlob(b64){
+    var bin = atob(b64), n = bin.length, u = new Uint8Array(n);
+    for(var i=0;i<n;i++) u[i] = bin.charCodeAt(i);
+    return new Blob([u], {type:'image/jpeg'});
+  }
+
+  document.getElementById('f').addEventListener('change', function(ev){
+    var file = ev.target.files && ev.target.files[0];
+    if(!file || !client) return;
+    document.getElementById('picklbl').style.display = 'none';
+    log.textContent = '';
+    file.text().then(function(txt){
+      var B = JSON.parse(txt);
+      if(!B || !B.docs || !B.images || !B.check) throw new Error('That is not the move file.');
+      var ids = Object.keys(B.images), done = 0, failed = [];
+      say('Uploading ' + ids.length + ' receipt photos…');
+      var chain = Promise.resolve();
+      ids.forEach(function(id){
+        chain = chain.then(function(){
+          return client.storage.from(RR_CONFIG.bucket)
+            .upload(uid + '/' + id, b64ToBlob(B.images[id]), {contentType:'image/jpeg', upsert:true})
+            .then(function(r){ if(r.error) failed.push(id + ': ' + r.error.message); else done++; });
+        });
+      });
+      return chain.then(function(){
+        say('Photos: ' + done + ' of ' + ids.length + ' uploaded.', failed.length ? 'bad' : 'ok');
+        failed.forEach(function(f){ say('  ' + f, 'bad'); });
+        say('Saving ' + B.docs.length + ' records…');
+        var rows = B.docs.map(function(d){ return {user_id:uid, collection:d.collection, id:d.id, data:d.data}; });
+        return client.from('receiptrun_docs').upsert(rows, {onConflict:'user_id,collection,id'});
+      }).then(function(r){
+        if(r.error) throw new Error('Records did not save: ' + r.error.message);
+        say('Records saved. Checking against the old app…');
+        return client.from('receiptrun_docs').select('collection,data').eq('user_id', uid);
+      }).then(function(r){
+        if(r.error) throw new Error(r.error.message);
+        var have = {}, total = 0;
+        (r.data||[]).forEach(function(x){
+          have[x.collection] = (have[x.collection]||0) + 1;
+          if(x.collection === 'receipts') total += Number(x.data.total || 0);
+        });
+        total = Math.round(total*100)/100;
+        var allOk = true;
+        Object.keys(B.check.counts).forEach(function(c){
+          var ok = have[c] === B.check.counts[c]; allOk = allOk && ok;
+          say((ok?'✓ ':'✗ ') + c + ': ' + (have[c]||0) + ' (old app: ' + B.check.counts[c] + ')', ok?'ok':'bad');
+        });
+        var tOk = total === B.check.receiptTotal; allOk = allOk && tOk;
+        say((tOk?'✓ ':'✗ ') + 'receipt total: $' + total.toFixed(2) + ' (old app: $' + B.check.receiptTotal.toFixed(2) + ')', tOk?'ok':'bad');
+        return client.storage.from(RR_CONFIG.bucket).list(uid, {limit:1000}).then(function(s){
+          var n = (s.data||[]).length, pOk = n >= B.check.images; allOk = allOk && pOk;
+          say((pOk?'✓ ':'✗ ') + 'photos in storage: ' + n + ' (old app: ' + B.check.images + ')', pOk?'ok':'bad');
+          say(allOk ? '\nAll moved. You can close this page and open Receipt Run.' : '\nSomething did not match. Tell Claude what is marked ✗.', allOk?'ok':'bad');
+        });
+      });
+    }).catch(function(e){ say(String(e && e.message || e), 'bad'); });
+  });
+})();
+</script>
+</body></html>
