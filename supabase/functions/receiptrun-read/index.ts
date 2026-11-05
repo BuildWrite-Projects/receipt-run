@@ -16,7 +16,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const DEFAULT_MODEL = Deno.env.get("RECEIPTRUN_MODEL") || "claude-haiku-5-5";
+const DEFAULT_MODEL = Deno.env.get("RECEIPTRUN_MODEL") || "claude-sonnet-5-5";
 const ALLOWED_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5"];
 const MAX_IMAGES = 6;
 const BUCKET = "receiptrun";
