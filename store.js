@@ -286,12 +286,42 @@
   };
 
   /* ---------- receipt reading --------------------------------------------- */
-  /* Not wired yet: the reading function comes in a later step. Until then the
-     app treats reading as unavailable, and new receipts wait as "Reading…". */
+  /* On claude.ai the page asked the host to read a receipt. Here it goes to
+     the receiptrun-read Supabase function, which holds the Anthropic key. */
+  function blobToB64(b) {
+    return new Promise(function (res, rej) {
+      var r = new FileReader();
+      r.onload = function () { var s = String(r.result); res(s.slice(s.indexOf(',') + 1)); };
+      r.onerror = function () { rej(r.error); };
+      r.readAsDataURL(b);
+    });
+  }
+  function callReader(body) {
+    return client.functions.invoke('receiptrun-read', { body: body }).then(function (r) {
+      if (r.error) throw err('network', r.error.message);
+      var d = r.data || {};
+      if (!d.ok) throw err(d.code || 'read_failed', d.message);
+      return d;
+    });
+  }
+  var readerReady = null;
   var sampleApi = {
-    limits: function () { return Promise.resolve({ images: false }); },
-    json: function () { return Promise.reject(err('not_granted', 'Receipt reading is not set up yet')); }
+    limits: function () {
+      if (!readerReady) {
+        readerReady = callReader({ ping: true }).then(function (d) { return { images: !!d.ready }; },
+          function () { readerReady = null; return { images: false }; });
+      }
+      return readerReady;
+    },
+    json: function (prompt, opts) {
+      var imgs = (opts && opts.images) || [];
+      return Promise.all(imgs.map(blobToB64)).then(function (b64) {
+        return callReader({ prompt: prompt, images: b64 });
+      }).then(function (d) { return d.result; });
+    }
   };
+  /* for the one-time side-by-side reading test (test-read.html) */
+  window.RR_read = callReader;
 
   /* ---------- the viewer -------------------------------------------------- */
 

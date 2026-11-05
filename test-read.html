@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reading Test</title>
+<!-- One-time side-by-side test: re-reads six already-filed receipts with the
+     cheap model (Haiku) and the mid model (Sonnet) and compares both to what
+     was saved. Nothing is changed. Costs well under 25 cents. Delete after. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="store.js"></script>
+<style>
+:root{--bg:#14161a;--surface:#1c1f25;--line:#333845;--fg:#ECEEF2;--muted:#99A2B1;--accent:#E8A33D;--accent-ink:#1A1205;--ok:#4FBF86;--danger:#E8604C;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 "IBM Plex Sans",Arial,sans-serif;padding:20px 16px;max-width:900px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 6px} p{color:var(--muted);margin:0 0 14px}
+button{background:var(--accent);color:var(--accent-ink);border:0;border-radius:10px;padding:13px 18px;font-weight:600;font-size:15px;cursor:pointer}
+button[disabled]{opacity:.5}
+table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500}
+.ok{color:var(--ok)} .bad{color:var(--danger)} .m{color:var(--muted)}
+#status{margin-top:12px;color:var(--muted)}
+#sum{margin-top:14px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;display:none}
+</style>
+</head><body>
+<h1>Receipt reading test</h1>
+<p>Re-reads six receipts you've already filed, with the cheap reader and the mid-priced one, and compares each to what's saved. Nothing in your receipts changes.</p>
+<button id="go" disabled>Signing in…</button>
+<div id="status"></div>
+<table id="t" hidden><thead><tr><th>Saved receipt</th><th>Haiku (cheap)</th><th>Sonnet (mid)</th></tr></thead><tbody></tbody></table>
+<div id="sum"></div>
+<script>
+(function(){
+  var TEST = ["rmuyvguuzbyvrkf","rmv2ro5vk4z0uif","rmv9gy4512xr0lw","rmvbf6zt3jzmyeh","rmvzf0dka3vtqa8","rmvigiyh4mjjaaw"];
+  var MODELS = [["claude-haiku-5-5",0.10,0.50],["claude-sonnet-5-5",2,10]];   // $ per million tokens in / out
+  var go = document.getElementById('go'), st = document.getElementById('status');
+  var client, prompt;
+
+  function getPrompt(){
+    return fetch('index.html').then(function(r){ return r.text(); }).then(function(src){
+      var a = src.indexOf('var ITEM_RULES ='), b = src.indexOf('var ITEMS_ONLY_PROMPT =');
+      if(a < 0 || b < a) throw new Error('Could not find the reading instructions in the app.');
+      return new Function(src.slice(a, b) + '\nreturn DOC_PROMPT;')();
+    });
+  }
+  window.claude.use('user').then(function(){
+    client = window.RR_client();
+    return getPrompt();
+  }).then(function(p){ prompt = p; go.disabled = false; go.textContent = 'Run the test'; })
+    .catch(function(e){ go.textContent = 'Could not start'; st.textContent = String(e && e.message || e); });
+
+  function money(n){ return n == null ? '—' : '$' + Number(n).toFixed(2); }
+  function cell(saved, r){
+    if(!r) return '<span class="bad">no answer</span>';
+    if(r.error) return '<span class="bad">' + r.error + '</span>';
+    var x = r.result || {};
+    var tOk = Number(x.total) === Number(saved.total), dOk = x.date === saved.date;
+    return (x.vendor || '—') + '<br>' +
+      '<span class="' + (dOk?'ok':'bad') + '">' + (x.date || '—') + '</span> · ' +
+      '<span class="' + (tOk?'ok':'bad') + '">' + money(x.total) + '</span><br>' +
+      '<span class="m">' + ((x.items||[]).length) + ' items · ' + (x.confidence||'?') + ' · ' + (r.secs) + 's</span>';
+  }
+
+  go.onclick = function(){
+    go.disabled = true; go.textContent = 'Running…';
+    var tb = document.querySelector('#t tbody'); document.getElementById('t').hidden = false;
+    var score = {}, cost = {}, n = 0;
+    MODELS.forEach(function(m){ score[m[0]] = 0; cost[m[0]] = 0; });
+    client.from('receiptrun_docs').select('id,data').eq('collection','receipts').in('id', TEST).then(function(r){
+      if(r.error) throw new Error(r.error.message);
+      var chain = Promise.resolve();
+      (r.data || []).forEach(function(row){
+        var saved = row.data, ids = (saved.assetIds && saved.assetIds.length) ? saved.assetIds : [saved.assetId];
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + (saved.vendor||'—') + '<br>' + (saved.date||'—') + ' · ' + money(saved.total) +
+          '<br><span class="m">' + ((saved.items||[]).length) + ' items saved</span></td><td>…</td><td>…</td>';
+        tb.appendChild(tr); n++;
+        MODELS.forEach(function(m, k){
+          chain = chain.then(function(){
+            st.textContent = 'Reading ' + (saved.vendor||'receipt') + ' with ' + m[0] + '…';
+            var t0 = Date.now();
+            return RR_read({prompt: prompt, assetIds: ids, model: m[0]}).then(function(d){
+              var res = {result: d.result, secs: ((Date.now()-t0)/1000).toFixed(1)};
+              var x = d.result || {};
+              if(Number(x.total) === Number(saved.total) && x.date === saved.date) score[m[0]]++;
+              if(d.usage) cost[m[0]] += (d.usage.input_tokens*m[1] + d.usage.output_tokens*m[2]) / 1e6;
+              tr.children[k+1].innerHTML = cell(saved, res);
+            }, function(e){ tr.children[k+1].innerHTML = cell(saved, {error: e.code + ': ' + e.message}); });
+          });
+        });
+      });
+      return chain;
+    }).then(function(){
+      st.textContent = 'Done.';
+      var s = document.getElementById('sum'); s.style.display = 'block';
+      s.innerHTML = MODELS.map(function(m){
+        return '<b>' + m[0] + '</b>: date and total both right on ' + score[m[0]] + ' of ' + n +
+          ' · this test cost about $' + cost[m[0]].toFixed(4) + ' (≈ $' + (cost[m[0]]/Math.max(n,1)).toFixed(4) + ' per receipt)';
+      }).join('<br>');
+      go.textContent = 'Finished';
+    }).catch(function(e){ st.textContent = String(e && e.message || e); go.textContent = 'Stopped'; });
+  };
+})();
+</script>
+</body></html>
