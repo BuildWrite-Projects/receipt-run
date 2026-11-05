@@ -1,0 +1,4266 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+<!-- Home-screen app (GitHub Pages) -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Receipt Run">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#14161a">
+<!-- Data: Supabase, answered through the same calls the app made on claude.ai (store.js) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="store.js"></script>
+</head><body>
+<title>Receipt Run</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen app shell — sticky header, swapping main, fixed bottom nav.
+   Committed dark: this is used outdoors and in a truck cab; a white flash is a bug. */
+:root{
+  --bg:#14161a;
+  --surface:#1c1f25;
+  --surface-2:#242831;
+  --line:#333845;
+  --line-soft:#272c36;
+  --fg:#ECEEF2;
+  --muted:#99A2B1;
+  --accent:#E8A33D;
+  --accent-ink:#1A1205;
+  --ok:#4FBF86;
+  --danger:#E8604C;
+  --font-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --font-body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  --font-data:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font-family:var(--font-body);font-size:15px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- header ---------- */
+.topbar{
+  flex:0 0 auto;display:flex;align-items:center;gap:10px;
+  padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top,0px));
+  background:var(--bg);border-bottom:1px solid var(--line-soft);
+}
+.brand{font-family:var(--font-display);font-weight:700;font-size:17px;letter-spacing:-.01em}
+.brand span{color:var(--accent)}
+.spacer{flex:1}
+.chip{
+  font-family:var(--font-data);font-size:11px;font-weight:500;letter-spacing:.02em;
+  padding:4px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);
+  white-space:nowrap;
+}
+.chip.live{color:var(--accent);border-color:#4a3a1c;background:#241c0c}
+.chip.bad{color:var(--danger);border-color:#4a2721;background:#2a1715}
+
+/* ---------- main ---------- */
+main{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px;padding-block:16px}
+.view[hidden]{display:none!important}
+
+/* ---------- scan view ---------- */
+.scan-wrap{display:flex;flex-direction:column;gap:14px;min-height:100%;justify-content:center;padding-block:8px}
+.shutter{
+  position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  width:100%;aspect-ratio:1/1;max-height:52vh;
+  border:2px dashed #3d4453;border-radius:20px;background:
+    radial-gradient(120% 90% at 50% 0%, #20242c 0%, var(--surface) 60%);
+  transition:border-color .15s ease, transform .08s ease;
+}
+.shutter{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.shutter:active{transform:scale(.99);border-color:var(--accent)}
+.shutter .ring{
+  width:84px;height:84px;border-radius:50%;background:var(--accent);
+  display:grid;place-items:center;box-shadow:0 0 0 6px rgba(232,163,61,.14);
+}
+.shutter .ring svg{width:38px;height:38px;display:block}
+.shutter .big{font-family:var(--font-display);font-weight:700;font-size:21px;letter-spacing:-.01em}
+.shutter .sub{color:var(--muted);font-size:13px;max-width:30ch;text-align:center}
+.scan-alt{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.linkbtn{display:inline-block;cursor:pointer;color:var(--muted);font-size:13px;text-decoration:underline;text-underline-offset:3px;padding:8px 4px}
+.scan-stats{
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--line-soft);
+  border:1px solid var(--line-soft);border-radius:12px;overflow:hidden;
+}
+.scan-stats div{background:var(--surface);padding:10px 12px}
+.scan-stats .k{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.scan-stats .v{font-family:var(--font-data);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+
+/* ---------- lists ---------- */
+.filters{display:flex;gap:7px;overflow-x:auto;padding-bottom:12px;margin:0 -16px;padding-inline:16px;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.fchip{
+  flex:0 0 auto;padding:7px 12px;border-radius:999px;border:1px solid var(--line);
+  color:var(--muted);font-size:13px;white-space:nowrap;
+}
+.fchip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.rows{display:flex;flex-direction:column;gap:1px;background:var(--line-soft);border:1px solid var(--line-soft);border-radius:12px;overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--surface);padding:11px 12px}
+.row:active{background:var(--surface-2)}
+.thumb{flex:0 0 auto;width:44px;height:52px;border-radius:6px;object-fit:cover;background:var(--surface-2);border:1px solid var(--line-soft)}
+.thumb.ph{display:grid;place-items:center;color:#4b5261;font-size:10px;font-family:var(--font-data)}
+.rmain{flex:1 1 auto;min-width:0}
+.rtop{display:flex;align-items:baseline;gap:8px}
+.vendor{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
+.amount{font-family:var(--font-data);font-weight:600;font-size:15px;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.rsub{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px;color:var(--muted);font-size:12px}
+.rsub .dot{opacity:.5}
+.tag{
+  font-family:var(--font-data);font-size:10px;letter-spacing:.03em;text-transform:uppercase;
+  padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);
+}
+.tag.review{color:var(--accent);border-color:#4a3a1c;background:#241c0c}
+.tag.wait{color:#7FB4E8;border-color:#23384d;background:#13202d}
+.tag.dup{color:var(--danger);border-color:#4a2721;background:#2a1715}
+.tag.reading{color:var(--muted)}
+.empty{
+  border:1px dashed var(--line);border-radius:12px;padding:28px 20px;text-align:center;color:var(--muted);
+}
+.empty b{display:block;color:var(--fg);font-family:var(--font-display);font-size:16px;margin-bottom:6px}
+.grouphead{
+  display:flex;align-items:baseline;gap:8px;margin:20px 0 8px;
+}
+.grouphead h2{margin:0;font-family:var(--font-display);font-size:14px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.grouphead .tot{margin-left:auto;font-family:var(--font-data);font-weight:600;font-variant-numeric:tabular-nums}
+.sumline{
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:12px 14px;margin-bottom:14px;
+}
+.sumline .n{font-family:var(--font-data);font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.sumline .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+
+/* ---------- sheets ---------- */
+.sheet{
+  position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:flex-end;
+  background:rgba(8,9,12,.72);backdrop-filter:blur(3px);
+}
+.sheet[hidden]{display:none!important}
+.sheet-inner{
+  background:var(--surface);border-top-left-radius:18px;border-top-right-radius:18px;
+  border-top:1px solid var(--line);max-height:92%;display:flex;flex-direction:column;
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  /* min-height:0 and overflow:hidden keep the body inside the panel; without
+     them a tall sheet spills past the bottom of the screen, unreachable. */
+  min-height:0;overflow:hidden;
+  animation:rise .18s ease-out;
+}
+/* Sheets that hold a long list get a DEFINITE height rather than a cap. With
+   only max-height the panel's height is content-derived, and the scrolling
+   body inside it has nothing firm to size against — iOS then renders it at
+   full content height and there is nothing to scroll. */
+.sheet-inner.tall{height:88%;max-height:88%}
+@keyframes rise{from{transform:translateY(14px);opacity:.6}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet-inner{animation:none}}
+.sheet-head{display:flex;align-items:center;gap:12px;padding:14px 16px 10px;border-bottom:1px solid var(--line-soft);flex:0 0 auto}
+.sheet-head h2{margin:0;font-family:var(--font-display);font-size:17px;flex:1 1 auto;min-width:0}
+/* flex:1 1 auto with min-height:0 is what actually makes this scroll — a flex
+   child defaults to min-height:auto and will not shrink below its content. */
+.sheet-body{
+  flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;padding:14px 16px 18px;display:flex;flex-direction:column;gap:12px;
+}
+/* a long split list can run past a phone screen, so the commit stays in reach */
+.stickysave{
+  position:sticky;bottom:-18px;z-index:2;margin-top:4px;
+  padding:10px 0 18px;background:var(--surface);
+  box-shadow:0 -10px 14px -8px var(--surface);
+}
+/* ---------- full-screen sub-view ---------- */
+.viewhead{display:flex;align-items:center;gap:8px;margin:0 0 14px}
+.viewhead h2{margin:0;font-family:var(--font-display);font-size:18px;flex:1 1 auto;min-width:0;letter-spacing:-.01em}
+.backbtn{color:var(--accent);font-size:15px;font-weight:600;padding:8px 10px 8px 0;flex:0 0 auto;white-space:nowrap}
+.savebar{
+  position:sticky;bottom:0;z-index:3;margin-top:14px;
+  padding:12px 0 calc(12px + env(safe-area-inset-bottom,0px));
+  background:var(--bg);box-shadow:0 -12px 16px -10px var(--bg);
+}
+.x{width:34px;height:34px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;flex:0 0 auto;font-size:18px;color:var(--muted)}
+
+/* job picker */
+.preview-strip{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line-soft)}
+.preview-strip img{width:46px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}
+.preview-strip .t{font-size:12px;color:var(--muted)}
+.pickgrid{display:grid;grid-template-columns:1fr;gap:8px}
+.pick{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:12px;
+  padding:15px 14px;font-size:16px;font-weight:500;
+}
+.pick:active{border-color:var(--accent)}
+.pick .ja{
+  flex:0 0 auto;width:30px;height:30px;border-radius:8px;background:#2f3542;
+  display:grid;place-items:center;font-family:var(--font-data);font-size:12px;font-weight:600;color:var(--accent);
+}
+.pick.recent .ja{background:var(--accent);color:var(--accent-ink)}
+.pick .arrow{margin-left:auto;color:var(--muted)}
+.pick.ghost{background:none;border-style:dashed;color:var(--muted);font-weight:400;justify-content:center}
+.seclabel{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:10px 0 2px}
+.seclabel:first-child{margin-top:0}
+
+/* forms */
+label.fld{display:flex;flex-direction:column;gap:5px}
+label.fld .cap{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.inp{
+  background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:11px 12px;
+  font-family:var(--font-data);font-size:15px;width:100%;
+}
+.inp:focus{border-color:var(--accent);outline:none}
+.inp::placeholder{color:#5b6372;font-style:italic;opacity:1}
+textarea.inp{font-family:var(--font-body);resize:vertical;min-height:62px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  background:var(--accent);color:var(--accent-ink);font-weight:600;font-size:16px;
+  border-radius:11px;padding:14px;
+}
+.btn:active{filter:brightness(.93)}
+.btn.sec{background:var(--surface-2);color:var(--fg);border:1px solid var(--line);font-weight:500}
+.btn.dngr{background:none;border:1px solid #4a2721;color:var(--danger);font-weight:500}
+.btn[disabled]{opacity:.5}
+.shot{width:100%;border-radius:10px;border:1px solid var(--line);display:block}
+.edge-area{position:relative;line-height:0;touch-action:none;user-select:none;-webkit-user-select:none}
+.edge-area img{width:100%;border-radius:10px;border:1px solid var(--line);display:block}
+#edge-svg{position:absolute;top:0;left:0;pointer-events:none}
+.handle{fill:#E8A33D;stroke:#1A1205;stroke-width:3}
+.edgebtn{display:inline-block;margin-top:4px;color:var(--accent);font-size:12px;font-weight:600;
+  text-decoration:underline;text-underline-offset:3px;padding:4px 0;cursor:pointer}
+.kv{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:7px 0;border-bottom:1px solid var(--line-soft)}
+.kv .k{color:var(--muted)}
+.kv .v{font-family:var(--font-data);text-align:right;font-variant-numeric:tabular-nums}
+.notice{
+  background:#241c0c;border:1px solid #4a3a1c;color:var(--accent);
+  border-radius:9px;padding:10px 12px;font-size:13px;
+}
+.notice.flat{background:var(--surface-2);border-color:var(--line);color:var(--muted)}
+
+/* ---------- bottom nav ---------- */
+nav{
+  flex:0 0 auto;display:grid;grid-template-columns:repeat(5,1fr);
+  border-top:1px solid var(--line-soft);background:var(--bg);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+nav button{
+  display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 4px 8px;
+  font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);position:relative;
+}
+nav button svg{width:21px;height:21px;display:block}
+nav button[aria-current="true"]{color:var(--accent)}
+nav .badge{
+  position:absolute;top:4px;left:calc(50% + 7px);min-width:16px;height:16px;border-radius:8px;
+  background:var(--accent);color:var(--accent-ink);font-family:var(--font-data);font-size:10px;font-weight:600;
+  display:grid;place-items:center;padding:0 4px;
+}
+nav .badge[hidden]{display:none!important}
+
+/* toast */
+.toast{
+  position:fixed;left:16px;right:16px;bottom:calc(74px + env(safe-area-inset-bottom,0px));z-index:60;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
+  padding:11px 14px;display:flex;align-items:center;gap:12px;font-size:14px;
+  box-shadow:0 8px 28px rgba(0,0,0,.45);
+}
+.toast[hidden]{display:none!important}
+.toast .u{margin-left:auto;color:var(--accent);font-weight:600;font-size:14px;flex:0 0 auto}
+.toast .ok{color:var(--ok)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+/* kept in the layout and merely invisible — iOS webviews refuse the camera on a
+   display:none input, and a <label for> tap is handled natively */
+.filein{position:fixed;bottom:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}
+.diag{
+  font-family:var(--font-data);font-size:12px;line-height:1.5;
+  background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;color:var(--muted);white-space:pre-wrap;word-break:break-word;
+}
+.diag[hidden]{display:none!important}
+.diag b{color:var(--accent);font-weight:600}
+.diag .err{color:var(--danger)}
+
+/* ---------- line items ---------- */
+.items{display:flex;flex-direction:column;gap:1px;background:var(--line-soft);border:1px solid var(--line-soft);border-radius:10px;overflow:hidden}
+.item{background:var(--surface);padding:10px 12px;display:flex;flex-direction:column;gap:7px}
+.item.open{background:#211a0e}
+.iline{display:flex;align-items:baseline;gap:10px}
+.iprint{font-family:var(--font-data);font-size:12px;color:var(--muted);flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.iprice{font-family:var(--font-data);font-size:13px;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.inp.sm{padding:9px 10px;font-size:14px;font-family:var(--font-body)}
+.guess{
+  align-self:flex-start;font-size:12px;color:var(--accent);background:#241c0c;
+  border:1px dashed #4a3a1c;border-radius:999px;padding:5px 11px;text-align:left;
+}
+.isel{
+  background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  padding:9px 10px;font-size:14px;width:100%;
+}
+/* the split list is tighter, so a short receipt needs no scrolling at all */
+.items.compact .item{padding:7px 10px;gap:4px}
+.items.compact .isel{padding:7px 9px}
+.items.compact .iprint{font-size:11.5px}
+.catline{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:7px 0;border-bottom:1px solid var(--line-soft)}
+.catline .c{color:var(--muted)}
+.catline .a{font-family:var(--font-data);font-variant-numeric:tabular-nums}
+.catline.tot{border-bottom:none;border-top:1px solid var(--line);margin-top:4px;padding-top:10px;font-weight:600}
+.catline.tot .c{color:var(--fg)}
+.tag.name{color:#7FB4E8;border-color:#23384d;background:#13202d}
+.tag.split{color:var(--ok);border-color:#1f4432;background:#11231b}
+.tag.filed{color:#8E96A5;border-color:#2b303a;background:#1b1f26}
+.tag.inv{color:#C9A227;border-color:#3d3418;background:#241f0f}
+.pagelbl{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;
+  color:#8E96A5;margin:12px 0 4px}
+.invbox{border:1px solid #2b303a;border-radius:10px;padding:10px 12px;margin:10px 0;
+  background:#15181e}
+.invrow{display:flex;gap:10px;justify-content:space-between;padding:3px 0;font-size:.86rem}
+.invrow .k{color:#8E96A5}
+.invrow .v{color:#E6E8EC;text-align:right;font-variant-numeric:tabular-nums}
+.row.done{opacity:.72}
+
+/* ---------- search ---------- */
+.searchwrap{position:relative;margin-bottom:10px}
+.search{
+  background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  padding:12px 40px 12px 13px;width:100%;font-size:16px;font-family:var(--font-body);
+}
+.search:focus{border-color:var(--accent);outline:none}
+.search::placeholder{color:#5b6372}
+.clearq{
+  position:absolute;right:5px;top:50%;transform:translateY(-50%);
+  width:30px;height:30px;border-radius:50%;color:var(--muted);font-size:18px;
+}
+.clearq[hidden]{display:none!important}
+.hitline{margin-top:4px;font-size:12px;color:var(--accent);font-family:var(--font-data);overflow-wrap:anywhere}
+
+/* ---------- totals ---------- */
+.span{display:flex;gap:7px;margin-bottom:14px}
+.span button{flex:1 1 0;padding:9px 6px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:13px}
+.span button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.tcard{background:var(--surface);padding:11px 12px}
+.tcard .top{display:flex;align-items:baseline;gap:10px}
+.tcard .tn{flex:1 1 auto;min-width:0;font-weight:600;font-size:15px;overflow-wrap:anywhere}
+.tcard .tv{font-family:var(--font-data);font-weight:600;font-size:15px;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.tcard .sub{color:var(--muted);font-size:12px;margin-top:3px}
+.tcard .sub.flag{color:var(--accent)}
+.gaps{background:#241c0c;border:1px solid #4a3a1c;border-radius:11px;padding:12px 14px;margin-bottom:16px}
+.gaps h3{margin:0 0 7px;font-family:var(--font-display);font-size:14px;color:var(--accent)}
+.gaps ul{margin:0;padding-left:18px;color:var(--fg);font-size:13px}
+.gaps li{margin:4px 0}
+.gaps li button{color:var(--accent);text-decoration:underline;text-underline-offset:3px;font-size:13px;padding:0}
+
+/* ---------- export destination ---------- */
+.destbar{margin:0 0 10px}
+.destnote{font-size:12.5px;color:var(--muted);line-height:1.45}
+.destnote.ok{color:var(--fg)}
+.destnote .folder{font-family:var(--font-data);color:var(--ok);font-weight:600;overflow-wrap:anywhere}
+.destbtn{
+  display:inline-block;margin:7px 10px 0 0;padding:7px 12px;
+  border:1px solid var(--line);border-radius:999px;color:var(--accent);
+  font-size:12.5px;font-weight:600;
+}
+.destbtn:active{border-color:var(--accent)}
+.destfail{
+  margin-top:9px;padding:10px 12px;border-radius:9px;
+  background:#241c0c;border:1px solid #4a3a1c;color:var(--accent);
+  font-size:13px;line-height:1.45;
+}
+.destcode{
+  margin-top:6px;font-family:var(--font-data);font-size:11.5px;color:var(--muted);
+  overflow-wrap:anywhere;
+}
+/* also report whether the page thinks it is framed, which decides the above */
+.framenote{margin-top:6px;font-family:var(--font-data);font-size:11.5px;color:var(--muted)}
+</style>
+
+<div class="topbar">
+  <div class="brand">Receipt <span>Run</span></div>
+  <div class="spacer"></div>
+  <div class="chip" id="netchip" hidden>0 waiting</div>
+  <div class="chip" id="modechip">Starting…</div>
+</div>
+
+<main>
+  <!-- SCAN -->
+  <section class="view" id="v-scan">
+    <div class="scan-wrap">
+      <label class="shutter" id="shutter" for="camin" tabindex="0">
+        <span class="ring" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#1A1205" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9a2 2 0 0 1 2-2h2.5l1.2-1.8A1 1 0 0 1 9.5 4.8h5a1 1 0 0 1 .8.4L16.5 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <circle cx="12" cy="13" r="3.4"/>
+          </svg>
+        </span>
+        <span class="big">Scan a receipt</span>
+        <span class="sub" id="shuttersub">Or a supply invoice. Opens the camera; it gets squared up and cleaned into a scan after you shoot it.</span>
+      </label>
+      <div class="diag" id="diag" hidden></div>
+      <div class="scan-alt">
+        <label class="linkbtn" id="pickfile" for="libin" tabindex="0">Pick from photos instead</label>
+      </div>
+      <div class="scan-stats">
+        <div><div class="k">This week</div><div class="v" id="st-week">—</div></div>
+        <div><div class="k">Receipts</div><div class="v" id="st-count">—</div></div>
+        <div><div class="k">Need review</div><div class="v" id="st-review">—</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RECEIPTS -->
+  <section class="view" id="v-list" hidden>
+    <div class="searchwrap">
+      <input class="search" id="q" type="search" autocomplete="off" autocorrect="off" autocapitalize="none"
+             enterkeyhint="search" placeholder="Search vendor, item, job, amount…">
+      <button class="clearq" id="qclear" aria-label="Clear search" hidden>&times;</button>
+    </div>
+    <div class="span" id="filedtabs"></div>
+    <div class="filters" id="filters"></div>
+    <div class="sumline">
+      <div><div class="l" id="sum-label">All receipts</div><div class="n" id="sum-total">$0.00</div></div>
+      <div style="text-align:right"><div class="l">Count</div><div class="n" id="sum-count">0</div></div>
+    </div>
+    <div id="listbody"></div>
+  </section>
+
+  <!-- REVIEW -->
+  <section class="view" id="v-review" hidden>
+    <p class="notice flat" style="margin:0 0 14px">Anything the reader wasn't sure about lands here, along with any line item too cryptic to recognise later. Fix it, save, and it drops off the list.</p>
+    <div id="reviewbody"></div>
+  </section>
+
+  <!-- RECEIPT DETAIL — a full view, for the same reason as the split. -->
+  <section class="view" id="v-detail" hidden>
+    <div class="viewhead">
+      <button class="backbtn" id="dv-back">&lsaquo;&nbsp;Back</button>
+      <h2 id="dv-title">Receipt</h2>
+    </div>
+    <div id="detailview"></div>
+  </section>
+
+  <!-- CATEGORY CHOOSER — 21 categories need a screen, not a popup. -->
+  <section class="view" id="v-cats" hidden>
+    <div class="viewhead">
+      <button class="backbtn" id="cv-back">&lsaquo;&nbsp;Back</button>
+      <h2 id="cv-title">What kind of expense?</h2>
+    </div>
+    <div id="catsview"></div>
+  </section>
+
+  <!-- SPLIT — a full view, not a sheet. It uses <main>'s scroller, which works
+       on devices where an overlay sheet's inner scroller does not. -->
+  <section class="view" id="v-split" hidden>
+    <div class="viewhead">
+      <button class="backbtn" id="sv-back">&lsaquo;&nbsp;Back</button>
+      <h2 id="sv-title">Split by category</h2>
+    </div>
+    <div id="splitview"></div>
+  </section>
+
+  <!-- TOTALS -->
+  <section class="view" id="v-totals" hidden>
+    <div id="totalsbody"></div>
+  </section>
+
+  <!-- EXPORT -->
+  <section class="view" id="v-export" hidden>
+    <p class="notice flat" style="margin:0 0 14px">A packet is the spreadsheet plus every receipt image, named to match. That's what a client gets if they ask to see where the money went.</p>
+    <div id="exportbody"></div>
+  </section>
+</main>
+
+<nav>
+  <button id="nav-scan" aria-current="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 1 2-2h2.5l1.2-1.8A1 1 0 0 1 9.5 4.8h5a1 1 0 0 1 .8.4L16.5 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.4"/></svg>
+    Scan
+  </button>
+  <button id="nav-list">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-2.5-1.6L13 21l-2.5-1.6L8 21l-2-1.3z"/><path d="M9 8h6M9 12h6"/></svg>
+    Receipts
+  </button>
+  <button id="nav-review">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5 21 19H3z"/><path d="M12 10v4M12 16.6v.01"/></svg>
+    Review
+    <span class="badge" id="rbadge" hidden>0</span>
+  </button>
+  <button id="nav-totals">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg>
+    Totals
+    <span class="badge" id="gbadge" hidden>0</span>
+  </button>
+  <button id="nav-export">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="m8 8 4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+    Export
+  </button>
+</nav>
+
+<!-- JOB PICKER -->
+<div class="sheet" id="sheet-pick" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-head">
+      <h2 id="pick-title">Which job?</h2>
+      <button class="x" id="pick-close" aria-label="Cancel">&times;</button>
+    </div>
+    <div class="preview-strip" id="pick-preview"></div>
+    <div class="sheet-body"><div class="pickgrid" id="pickgrid"></div></div>
+  </div>
+</div>
+
+<!-- EDGE EDITOR -->
+<div class="sheet" id="sheet-edges" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-head">
+      <h2>Drag the corners</h2>
+      <button class="x" id="edge-cancel" aria-label="Cancel">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <p class="notice flat" style="margin:0">Put a dot on each corner of the receipt. Everything outside gets cut away.</p>
+      <div class="edge-area" id="edge-area">
+        <img id="edge-img" alt="Photo you took">
+        <svg id="edge-svg" xmlns="http://www.w3.org/2000/svg">
+          <path id="edge-path" fill="rgba(232,163,61,.14)" stroke="#E8A33D" stroke-width="2"></path>
+          <circle id="h-tl" r="13" class="handle"></circle>
+          <circle id="h-tr" r="13" class="handle"></circle>
+          <circle id="h-br" r="13" class="handle"></circle>
+          <circle id="h-bl" r="13" class="handle"></circle>
+        </svg>
+      </div>
+      <button class="btn" id="edge-apply">Use these edges</button>
+      <button class="btn sec" id="edge-full">Use the whole photo</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW JOB -->
+<div class="sheet" id="sheet-newjob" hidden>
+  <div class="sheet-inner">
+    <div class="sheet-head">
+      <h2>New job</h2>
+      <button class="x" id="nj-close" aria-label="Cancel">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <label class="fld"><span class="cap">Job name</span>
+        <input class="inp" id="nj-name" placeholder="Kelly Garage &amp; Apartment" autocomplete="off">
+      </label>
+      <p class="notice flat">Name it the way the folder is named. You can tidy it later.</p>
+      <button class="btn" id="nj-save">Create and file this receipt</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden><span id="toast-msg"></span><button class="u" id="toast-undo" hidden>Undo</button></div>
+
+<input type="file" accept="image/*" capture="environment" id="camin" class="filein">
+<input type="file" accept="image/*,application/pdf,.pdf" id="libin" class="filein" multiple>
+<!-- further pages of a multi-page paper invoice, shot one at a time -->
+<input type="file" accept="image/*" capture="environment" id="pagein" class="filein">
+
+<script>
+(function(){
+"use strict";
+
+/* ============================ constants ============================ */
+/* These are NOT invented — they are the exact strings from the Categories
+   Reference tab of BuildWrite Projects_Deductible Expense Tracker.xlsx, whose
+   Category Summary runs SUMIFS against them. A near miss counts as nothing. */
+var BW_CATS = [
+  /* "Vehicle / Mileage" is deliberately NOT here. Mileage is claimed from the
+     Mileage Log at the IRS rate per mile; an expense-log category of the same
+     name would double-count against it. Actual fuel and running costs go to
+     the category below, and the two methods are an either/or for the
+     accountant to settle. Retired from the tracker's dropdown to match. */
+  "Fuel (actual expense)",
+  "Computer & Equipment",
+  "Tools & Small Equipment",
+  "Safety Gear / PPE",
+  "Insurance (business liability)",
+  "Legal & Professional Fees",
+  "Licenses & Permits",
+  "Continuing Education",
+  "Dues & Memberships",
+  "Office Supplies",
+  "Software & Subscriptions",
+  "Phone (business use %)",
+  "Bank & Payment Processing Fees",
+  "Marketing & Advertising",
+  "Travel (out of town)",
+  "Meals (business, 50% limit)",
+  "Contract Labor",
+  "Repairs & Maintenance (tools/equipment)",
+  "Other"
+  /* "Home office" and "Pre-formation costs" are deliberately absent.
+     Home office is a calculated deduction (a share of household costs by
+     square footage), not a purchase -- paper and whiteout are Office Supplies.
+     Pre-formation is a DATE question, answered by the Expense Log's own
+     Pre-Formation Cost? Y/N column, so a receipt keeps both its real category
+     and its timing instead of having to choose. Neither had a Category Summary
+     row, so anything filed to them totalled nowhere. */
+];
+var INCOME_STREAMS = ["General / LLC Overhead","PM Fee","Profit Share","On-Site Labor"];
+var PAY_METHODS = ["Business Bank Account","Business Credit Card","Cash","Personal (needs reimbursement)"];
+/* Not a tracker category — it marks a line that must stay OUT of the
+   deductible log entirely. */
+var PERSONAL = "Not a business expense";
+var SPLIT_CATS = BW_CATS.concat([PERSONAL]);
+/* what the app used to call things, before the tracker's real list arrived */
+var CAT_MIGRATION = {
+  "Office supplies":"Office Supplies",
+  "Vehicle / Mileage":"Fuel (actual expense)",
+  "Fuel / vehicle":"Repairs & Maintenance (tools/equipment)",
+  "Client meals":"Meals (business, 50% limit)",
+  "Tools & equipment":"Tools & Small Equipment",
+  "Software":"Software & Subscriptions",
+  "Marketing":"Marketing & Advertising"
+};
+function migrateCat(c){ return CAT_MIGRATION[c] || c; }
+var MAX_EDGE = 1500;
+var MAX_ITEMS = 80;
+
+/* ============================ state ============================ */
+var S = {
+  db:null, assets:null, sample:null, user:null, downloads:null,
+  canImages:false, writable:true,
+  jobs:[], receipts:[], queue:[], aliases:{}, divisions:{}, cards:{}, jobCodes:{},
+  filter:"all", q:"", span:"month", filed:"unfiled", pending:null, lastJobIds:[],
+  objUrls:{}
+};
+
+/* ============================ tiny helpers ============================ */
+function $(id){ return document.getElementById(id); }
+function el(tag, cls, txt){ var e=document.createElement(tag); if(cls)e.className=cls; if(txt!=null)e.textContent=txt; return e; }
+function money(n){
+  if(n==null || isNaN(n)) return "—";
+  return "$" + Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function uid(){
+  return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+}
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function mmddyy(d){
+  var x;
+  if(!d) x = new Date();
+  else if(/^\d{4}-\d{2}-\d{2}/.test(String(d))){
+    /* "2026-09-29" parses as UTC midnight, which reads as the 28th anywhere
+       west of Greenwich. A receipt dated the 29th has to be named the 29th. */
+    var p0 = String(d).slice(0,10).split("-");
+    x = new Date(Number(p0[0]), Number(p0[1]) - 1, Number(p0[2]), 12);
+  }
+  else x = new Date(d);
+  if(isNaN(x.getTime())) x = new Date();
+  var p = function(n){ return (n<10?"0":"")+n; };
+  return p(x.getMonth()+1) + p(x.getDate()) + String(x.getFullYear()).slice(2);
+}
+function shortDate(iso){
+  if(!iso) return "no date";
+  var p = String(iso).split("-");
+  if(p.length!==3) return iso;
+  return Number(p[1]) + "/" + Number(p[2]);
+}
+function initials(name){
+  var w = String(name||"?").replace(/[^A-Za-z0-9 ]/g," ").trim().split(/\s+/);
+  if(!w[0]) return "?";
+  return (w[0][0] + (w[1]? w[1][0] : "")).toUpperCase();
+}
+function safeName(s){
+  return String(s||"").replace(/[\\/:*?"<>|]/g,"-").replace(/\s+/g," ").trim();
+}
+function toast(msg, undoFn){
+  $("toast-msg").textContent = msg;
+  var u = $("toast-undo");
+  u.hidden = !undoFn;
+  u.onclick = function(){ $("toast").hidden = true; if(undoFn) undoFn(); };
+  $("toast").hidden = false;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(function(){ $("toast").hidden = true; }, undoFn ? 6000 : 2600);
+}
+
+/* ============================ local queue (IndexedDB) ============================ */
+var IDB = (function(){
+  var dbp = null;
+  function open(){
+    if(dbp) return dbp;
+    dbp = new Promise(function(res,rej){
+      var rq;
+      try{ rq = indexedDB.open("receiptrun",2); }catch(e){ return rej(e); }
+      rq.onupgradeneeded = function(){
+        var d = rq.result;
+        if(!d.objectStoreNames.contains("queue")) d.createObjectStore("queue",{keyPath:"localId"});
+        /* folder handles for direct writing — structured-cloneable, so they
+           survive here but cannot be kept in localStorage */
+        if(!d.objectStoreNames.contains("folders")) d.createObjectStore("folders");
+      };
+      rq.onsuccess = function(){ res(rq.result); };
+      rq.onerror = function(){ rej(rq.error); };
+    });
+    return dbp;
+  }
+  function tx(store, mode, fn){
+    return open().then(function(d){
+      return new Promise(function(res,rej){
+        var t = d.transaction(store, mode);
+        var out = fn(t.objectStore(store));
+        t.oncomplete = function(){ res(out && out.result !== undefined ? out.result : out); };
+        t.onerror = function(){ rej(t.error); };
+      });
+    });
+  }
+  return {
+    put:  function(item){ return tx("queue","readwrite", function(s){ return s.put(item); }); },
+    all:  function(){ return tx("queue","readonly",  function(s){ return s.getAll(); }); },
+    del:  function(id){ return tx("queue","readwrite", function(s){ return s.delete(id); }); },
+    putFolder: function(key, rec){ return tx("folders","readwrite", function(s){ return s.put(rec, key); }); },
+    getFolder: function(key){ return tx("folders","readonly", function(s){ return s.get(key); }); },
+    allFolders: function(){ return tx("folders","readonly", function(s){ return s.getAll(); }); },
+    delFolder: function(key){ return tx("folders","readwrite", function(s){ return s.delete(key); }); }
+  };
+})();
+
+/* ============================ writing into a real folder ============================
+   A downloaded file still has to be moved by hand. The File System Access API
+   lets the page hold a folder handle and write into it directly, so an export
+   lands in the job's own folder and nowhere else. Chrome/Edge on a desktop
+   only, and the picker needs a real click. Everything degrades to a download. */
+var FS = (function(){
+  function supported(){
+    try{ return typeof window.showDirectoryPicker === "function"; }catch(e){ return false; }
+  }
+  function perm(h, ask){
+    if(!h || !h.queryPermission) return Promise.resolve(false);
+    var o = {mode:"readwrite"};
+    return h.queryPermission(o).then(function(st){
+      if(st === "granted") return true;
+      if(!ask) return false;
+      return h.requestPermission(o).then(function(s2){ return s2 === "granted"; });
+    }).catch(function(){ return false; });
+  }
+  function pick(key, label){
+    if(!supported()) return Promise.reject(new Error("unsupported"));
+    return window.showDirectoryPicker({ id:"rr_"+key, mode:"readwrite" }).then(function(h){
+      return IDB.putFolder(key, { handle:h, name:h.name, label:label, boundAt:new Date().toISOString() })
+        .then(function(){ return h; });
+    });
+  }
+  function stored(key){
+    return IDB.getFolder(key).then(function(rec){ return rec || null; }).catch(function(){ return null; });
+  }
+  /* data: string or Blob */
+  function writeFile(h, name, data){
+    return h.getFileHandle(name, {create:true}).then(function(fh){
+      return fh.createWritable().then(function(w){
+        return Promise.resolve(w.write(data)).then(function(){ return w.close(); });
+      });
+    });
+  }
+  return { supported:supported, perm:perm, pick:pick, stored:stored, writeFile:writeFile };
+})();
+
+/* ============================ image processing ============================ */
+function loadBitmap(file){
+  if(window.createImageBitmap){
+    return createImageBitmap(file,{imageOrientation:"from-image"}).catch(function(){ return loadViaImg(file); });
+  }
+  return loadViaImg(file);
+}
+function loadViaImg(file){
+  return new Promise(function(res,rej){
+    var url = URL.createObjectURL(file);
+    var im = new Image();
+    im.onload = function(){ URL.revokeObjectURL(url); res(im); };
+    im.onerror = function(e){ URL.revokeObjectURL(url); rej(e); };
+    im.src = url;
+  });
+}
+
+// Otsu threshold over a 256-bin luminance histogram.
+function otsu(hist, total){
+  var sum=0, i;
+  for(i=0;i<256;i++) sum += i*hist[i];
+  var sumB=0, wB=0, best=0, thr=128;
+  for(i=0;i<256;i++){
+    wB += hist[i]; if(!wB) continue;
+    var wF = total - wB; if(!wF) break;
+    sumB += i*hist[i];
+    var mB = sumB/wB, mF = (sum-sumB)/wF;
+    var v = wB*wF*(mB-mF)*(mB-mF);
+    if(v>best){ best=v; thr=i; }
+  }
+  return thr;
+}
+
+/* Crop to the receipt: receipts are the bright thing in the frame. Threshold,
+   project bright pixels onto each axis, take the dominant run. Bails out (keeps
+   the full frame) whenever the result looks implausible. */
+function findCrop(data, w, h){
+  var hist = new Uint32Array(256), lum = new Uint8Array(w*h), i, p;
+  for(i=0, p=0; i<data.length; i+=4, p++){
+    var g = (data[i]*77 + data[i+1]*150 + data[i+2]*29) >> 8;
+    lum[p] = g; hist[g]++;
+  }
+  var thr = Math.max(otsu(hist, w*h), 60);
+  var rows = new Uint32Array(h), cols = new Uint32Array(w);
+  for(var y=0;y<h;y++){
+    var base = y*w;
+    for(var x=0;x<w;x++){
+      if(lum[base+x] > thr){ rows[y]++; cols[x]++; }
+    }
+  }
+  function run(arr, span){
+    var max=0, k;
+    for(k=0;k<arr.length;k++) if(arr[k]>max) max=arr[k];
+    if(max < span*0.12) return null;
+    var cut = max*0.30;
+    var bestS=-1,bestE=-1,curS=-1;
+    for(k=0;k<arr.length;k++){
+      if(arr[k]>cut){ if(curS<0) curS=k; }
+      else { if(curS>=0){ if(k-curS > bestE-bestS){ bestS=curS; bestE=k; } curS=-1; } }
+    }
+    if(curS>=0 && arr.length-curS > bestE-bestS){ bestS=curS; bestE=arr.length; }
+    if(bestS<0) return null;
+    return [bestS,bestE];
+  }
+  var ry = run(rows, w), rx = run(cols, h);
+  if(!ry || !rx) return null;
+  var padY = Math.round((ry[1]-ry[0])*0.03) + 4;
+  var padX = Math.round((rx[1]-rx[0])*0.04) + 4;
+  var x0 = Math.max(0, rx[0]-padX), x1 = Math.min(w, rx[1]+padX);
+  var y0 = Math.max(0, ry[0]-padY), y1 = Math.min(h, ry[1]+padY);
+  var cw = x1-x0, ch = y1-y0;
+  if(cw < w*0.22 || ch < h*0.22) return null;        // suspiciously small — don't risk it
+  if(cw*ch > w*h*0.97) return null;                   // nothing meaningfully cropped
+  return {x:x0,y:y0,w:cw,h:ch};
+}
+
+/* Stretch levels so faint thermal print reads. */
+function autoLevels(data){
+  var hist = new Uint32Array(256), i, n = data.length/4;
+  for(i=0;i<data.length;i+=4){
+    hist[(data[i]*77 + data[i+1]*150 + data[i+2]*29) >> 8]++;
+  }
+  var lo=0, hi=255, acc=0, loCut=n*0.02, hiCut=n*0.985;
+  for(i=0;i<256;i++){ acc+=hist[i]; if(acc>=loCut){ lo=i; break; } }
+  acc=0;
+  for(i=0;i<256;i++){ acc+=hist[i]; if(acc>=hiCut){ hi=i; break; } }
+  if(hi-lo < 30){ lo=0; hi=255; }
+  var map = new Uint8Array(256), span = hi-lo;
+  for(i=0;i<256;i++){
+    var v = (i-lo)/span;
+    v = v<0?0:(v>1?1:v);
+    map[i] = Math.round(Math.pow(v,0.92)*255);
+  }
+  for(i=0;i<data.length;i+=4){
+    data[i]=map[data[i]]; data[i+1]=map[data[i+1]]; data[i+2]=map[data[i+2]];
+  }
+}
+
+function grayOf(data,w,h){
+  var g=new Uint8Array(w*h);
+  for(var i=0,p=0;i<data.length;i+=4,p++) g[p]=(data[i]*77+data[i+1]*150+data[i+2]*29)>>8;
+  return g;
+}
+function histOf(g){ var hst=new Uint32Array(256); for(var i=0;i<g.length;i++) hst[g[i]]++; return hst; }
+function polyArea(p){
+  var a=0;
+  for(var i=0;i<p.length;i++){ var j=(i+1)%p.length; a += p[i][0]*p[j][1]-p[j][0]*p[i][1]; }
+  return Math.abs(a)/2;
+}
+function orderQuad(pts){
+  var bySum=pts.slice().sort(function(a,b){ return (a[0]+a[1])-(b[0]+b[1]); });
+  var byDif=pts.slice().sort(function(a,b){ return (a[0]-a[1])-(b[0]-b[1]); });
+  return { tl:bySum[0], br:bySum[3], bl:byDif[0], tr:byDif[3] };
+}
+function quadOk(q,w,h){
+  if(!q.tl||!q.tr||!q.br||!q.bl) return false;
+  var pts=[q.tl,q.tr,q.br,q.bl], i;
+  for(i=0;i<4;i++){
+    if(!isFinite(pts[i][0])||!isFinite(pts[i][1])) return false;
+    if(pts[i][0]<-w*0.12||pts[i][0]>w*1.12) return false;
+    if(pts[i][1]<-h*0.12||pts[i][1]>h*1.12) return false;
+  }
+  // convex, same winding all the way round
+  var sign=0;
+  for(i=0;i<4;i++){
+    var a=pts[i], b=pts[(i+1)%4], c=pts[(i+2)%4];
+    var cr=(b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]);
+    if(Math.abs(cr)<1e-6) continue;
+    var sg=cr>0?1:-1;
+    if(sign===0) sign=sg; else if(sg!==sign) return false;
+  }
+  var d=function(a,b){ return Math.sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])); };
+  var mn=Math.min(d(q.tl,q.tr),d(q.tr,q.br),d(q.br,q.bl),d(q.bl,q.tl));
+  if(mn < Math.min(w,h)*0.10) return false;
+  var ar=polyArea(pts);
+  if(ar < w*h*0.07 || ar > w*h*0.99) return false;
+  return true;
+}
+function inQuad(x,y,q){
+  var pts=[q.tl,q.tr,q.br,q.bl], sign=0;
+  for(var i=0;i<4;i++){
+    var a=pts[i], b=pts[(i+1)%4];
+    var cr=(b[0]-a[0])*(y-a[1])-(b[1]-a[1])*(x-a[0]);
+    if(cr===0) continue;
+    var sg=cr>0?1:-1;
+    if(sign===0) sign=sg; else if(sg!==sign) return false;
+  }
+  return true;
+}
+
+/* How much of each side of the quad sits on a real edge in the picture. */
+function sideSupport(q, mask, w, h){
+  var sides=[[q.tl,q.tr],[q.tr,q.br],[q.br,q.bl],[q.bl,q.tl]], tot=0, s;
+  for(s=0;s<4;s++){
+    var a=sides[s][0], b=sides[s][1], hit=0, n=48, i;
+    for(i=0;i<=n;i++){
+      var x=Math.round(a[0]+(b[0]-a[0])*i/n), y=Math.round(a[1]+(b[1]-a[1])*i/n);
+      var found=false, dx, dy;
+      for(dy=-2;dy<=2&&!found;dy++) for(dx=-2;dx<=2;dx++){
+        var xx=x+dx, yy=y+dy;
+        if(xx<0||yy<0||xx>=w||yy>=h) continue;
+        if(mask[yy*w+xx]){ found=true; break; }
+      }
+      if(found) hit++;
+    }
+    tot += hit/(n+1);
+  }
+  return tot/4;
+}
+
+/* ---------------- paper detection by colour ----------------
+   The thing being photographed is paper: bright and almost colourless. A hand
+   is strongly coloured, a wooden desk is strongly coloured, a dim room is dark.
+   Judging brightness only among the colourless pixels keeps a curled receipt
+   whose top half is in shadow. */
+function morphSep(m,w,h,r,grow){
+  var tmp=new Uint8Array(w*h), out=new Uint8Array(w*h), x, y, k;
+  for(y=0;y<h;y++) for(x=0;x<w;x++){
+    var f=grow?0:1;
+    for(k=-r;k<=r;k++){
+      var xx=x+k;
+      var v=(xx<0||xx>=w)?0:m[y*w+xx];
+      if(grow){ if(v){ f=1; break; } } else if(!v){ f=0; break; }
+    }
+    tmp[y*w+x]=f;
+  }
+  for(y=0;y<h;y++) for(x=0;x<w;x++){
+    var f2=grow?0:1;
+    for(k=-r;k<=r;k++){
+      var yy=y+k;
+      var v2=(yy<0||yy>=h)?0:tmp[yy*w+x];
+      if(grow){ if(v2){ f2=1; break; } } else if(!v2){ f2=0; break; }
+    }
+    out[y*w+x]=f2;
+  }
+  return out;
+}
+function largestComponent(m,w,h){
+  var lab=new Int32Array(w*h), st=new Int32Array(w*h), id=0, best=null, s;
+  for(s=0;s<w*h;s++){
+    if(!m[s]||lab[s]) continue;
+    id++;
+    var top=0, n=0; st[top++]=s; lab[s]=id;
+    while(top>0){
+      var p=st[--top], y=(p/w)|0, x=p-y*w; n++;
+      if(x>0&&m[p-1]&&!lab[p-1]){ lab[p-1]=id; st[top++]=p-1; }
+      if(x<w-1&&m[p+1]&&!lab[p+1]){ lab[p+1]=id; st[top++]=p+1; }
+      if(y>0&&m[p-w]&&!lab[p-w]){ lab[p-w]=id; st[top++]=p-w; }
+      if(y<h-1&&m[p+w]&&!lab[p+w]){ lab[p+w]=id; st[top++]=p+w; }
+    }
+    if(!best||n>best.n) best={n:n,id:id};
+  }
+  if(!best) return null;
+  var o=new Uint8Array(w*h);
+  for(s=0;s<w*h;s++) if(lab[s]===best.id) o[s]=1;
+  return {m:o, n:best.n};
+}
+/* Least squares with two trimming passes, so a finger notch or a stray bright
+   object doesn't drag the edge off the paper. */
+function fitLineRobust(U,V){
+  var idx=[], i;
+  for(i=0;i<U.length;i++) idx.push(i);
+  var a=0, b=0;
+  for(var pass=0;pass<3;pass++){
+    var su=0,sv=0,suu=0,suv=0,n=idx.length;
+    if(n<4) break;
+    for(i=0;i<n;i++){ var j=idx[i]; su+=U[j]; sv+=V[j]; suu+=U[j]*U[j]; suv+=U[j]*V[j]; }
+    var den=n*suu-su*su;
+    if(Math.abs(den)<1e-9) break;
+    a=(n*suv-su*sv)/den; b=(sv-a*su)/n;
+    var res=[];
+    for(i=0;i<n;i++){ var k=idx[i]; res.push(Math.abs(V[k]-(a*U[k]+b))); }
+    res.sort(function(p,q){ return p-q; });
+    var med=res[Math.floor(res.length/2)]||1, lim=Math.max(2, med*2.2), next=[];
+    for(i=0;i<idx.length;i++){ var z=idx[i]; if(Math.abs(V[z]-(a*U[z]+b))<=lim) next.push(z); }
+    if(next.length<4) break;
+    idx=next;
+  }
+  return {a:a,b:b};
+}
+function quadFromMask(m,w,h){
+  var rowCount=new Int32Array(h), colCount=new Int32Array(w), x, y;
+  for(y=0;y<h;y++) for(x=0;x<w;x++) if(m[y*w+x]){ rowCount[y]++; colCount[x]++; }
+  function medOf(arr){
+    var s=[], i;
+    for(i=0;i<arr.length;i++) if(arr[i]>0) s.push(arr[i]);
+    if(!s.length) return 0;
+    s.sort(function(a,b){ return a-b; });
+    return s[Math.floor(s.length/2)];
+  }
+  var rMed=medOf(rowCount), cMed=medOf(colCount);
+  var rows=[],rlo=[],rhi=[],cols=[],clo=[],chi=[];
+  for(y=0;y<h;y++){
+    if(rowCount[y]<rMed*0.45) continue;
+    var lo=-1,hi=-1;
+    for(x=0;x<w;x++) if(m[y*w+x]){ if(lo<0) lo=x; hi=x; }
+    rows.push(y); rlo.push(lo); rhi.push(hi);
+  }
+  for(x=0;x<w;x++){
+    if(colCount[x]<cMed*0.45) continue;
+    var lo2=-1,hi2=-1;
+    for(y=0;y<h;y++) if(m[y*w+x]){ if(lo2<0) lo2=y; hi2=y; }
+    cols.push(x); clo.push(lo2); chi.push(hi2);
+  }
+  if(rows.length<6||cols.length<6) return null;
+  var L=fitLineRobust(rows,rlo), R=fitLineRobust(rows,rhi);   // x = a*y + b
+  var T=fitLineRobust(cols,clo), B=fitLineRobust(cols,chi);   // y = a*x + b
+  function cross(S,H){
+    var d=1-S.a*H.a;
+    if(Math.abs(d)<1e-9) return null;
+    var yy=(H.a*S.b+H.b)/d;
+    return [S.a*yy+S.b, yy];
+  }
+  var tl=cross(L,T), tr=cross(R,T), br=cross(R,B), bl=cross(L,B);
+  if(!tl||!tr||!br||!bl) return null;
+  return {tl:tl,tr:tr,br:br,bl:bl};
+}
+function detectQuadPaper(data,w,h){
+  var val=new Uint8Array(w*h), low=new Uint8Array(w*h), i, p;
+  for(i=0,p=0;p<w*h;p++,i+=4){
+    var r=data[i], g=data[i+1], b=data[i+2];
+    var mx=r>g?(r>b?r:b):(g>b?g:b), mn=r<g?(r<b?r:b):(g<b?g:b);
+    val[p]=mx;
+    if(mx>0 && (mx-mn)/mx <= 0.26) low[p]=1;
+  }
+  var hist=new Uint32Array(256), n=0;
+  for(p=0;p<w*h;p++) if(low[p]){ hist[val[p]]++; n++; }
+  if(n < w*h*0.02) return null;
+  var thr=Math.max(70, otsu(hist,n));
+  var m=new Uint8Array(w*h);
+  for(p=0;p<w*h;p++) if(low[p]&&val[p]>=thr) m[p]=1;
+
+  m=morphSep(morphSep(m,w,h,1,false),w,h,1,true);   // drop specks and thin bridges
+  m=morphSep(morphSep(m,w,h,4,true),w,h,4,false);   // bridge the printing
+  var comp=largestComponent(m,w,h);
+  if(!comp || comp.n < w*h*0.05) return null;
+  var q=quadFromMask(comp.m,w,h);
+  if(!q||!quadOk(q,w,h)) return null;
+  var ar=polyArea([q.tl,q.tr,q.br,q.bl]);
+  if(comp.n < ar*0.55) return null;                 // blob doesn't really fill its own rectangle
+  if(ar > w*h*0.88) return null;                    // that's the surface it's lying on, not the paper
+
+  // There must be a real step in brightness at the border. Without one we have
+  // most likely merged the receipt into a white counter — hand off to the
+  // edge detector rather than return the whole table.
+  var sides=[[q.tl,q.tr],[q.tr,q.br],[q.br,q.bl],[q.bl,q.tl]];
+  var cx=(q.tl[0]+q.tr[0]+q.br[0]+q.bl[0])/4, cy=(q.tl[1]+q.tr[1]+q.br[1]+q.bl[1])/4;
+  var inS=0,inN=0,outS=0,outN=0, si, ti;
+  for(si=0;si<4;si++){
+    var a=sides[si][0], b=sides[si][1];
+    for(ti=0;ti<=24;ti++){
+      var px=a[0]+(b[0]-a[0])*ti/24, py=a[1]+(b[1]-a[1])*ti/24;
+      var nx=cx-px, ny=cy-py, len=Math.sqrt(nx*nx+ny*ny)||1;
+      nx/=len; ny/=len;
+      var ix=Math.round(px+nx*5), iy=Math.round(py+ny*5);
+      var ox=Math.round(px-nx*5), oy=Math.round(py-ny*5);
+      if(ix>=0&&iy>=0&&ix<w&&iy<h){ inS+=val[iy*w+ix]; inN++; }
+      if(ox>=0&&oy>=0&&ox<w&&oy<h){ outS+=val[oy*w+ox]; outN++; }
+    }
+  }
+  if(inN>20&&outN>20&&(inS/inN)-(outS/outN) < 12) return null;
+  return q;
+}
+
+/* ---------------- edge-based page detection ----------------
+   Brightness alone fails the moment a hand, a dashboard or a white counter is
+   in frame. A receipt's real signature is four long straight edges, so: Sobel
+   for gradients, a Hough accumulator for the lines, then the best pair of
+   roughly-parallel lines in each of two perpendicular directions. */
+function blur3(g,w,h){
+  var o=new Uint8Array(w*h), x, y;
+  for(y=0;y<h;y++) for(x=0;x<w;x++){
+    var s=0,n=0,dy,dx;
+    for(dy=-1;dy<=1;dy++) for(dx=-1;dx<=1;dx++){
+      var yy=y+dy, xx=x+dx;
+      if(yy<0||xx<0||yy>=h||xx>=w) continue;
+      s+=g[yy*w+xx]; n++;
+    }
+    o[y*w+x]=s/n;
+  }
+  return o;
+}
+function sobel(g,w,h){
+  var mag=new Float32Array(w*h), ang=new Float32Array(w*h), x, y;
+  for(y=1;y<h-1;y++) for(x=1;x<w-1;x++){
+    var i=y*w+x;
+    var gx = -g[i-w-1]-2*g[i-1]-g[i+w-1] + g[i-w+1]+2*g[i+1]+g[i+w+1];
+    var gy = -g[i-w-1]-2*g[i-w]-g[i-w+1] + g[i+w-1]+2*g[i+w]+g[i+w+1];
+    mag[i]=Math.sqrt(gx*gx+gy*gy);
+    ang[i]=Math.atan2(gy,gx);
+  }
+  return {mag:mag, ang:ang};
+}
+function edgePixels(mag,w,h,frac){
+  var i, mx=0;
+  for(i=0;i<mag.length;i++) if(mag[i]>mx) mx=mag[i];
+  if(mx<=0) return {pts:[], thr:0};
+  var hist=new Uint32Array(1024);
+  for(i=0;i<mag.length;i++) hist[Math.min(1023,(mag[i]/mx*1023)|0)]++;
+  var want=Math.floor(mag.length*frac), run=0, bin=1023;
+  for(i=1023;i>=0;i--){ run+=hist[i]; if(run>=want){ bin=i; break; } }
+  var thr=bin/1023*mx;
+  // A generous threshold is the only way to keep a page border that is faint
+  // against a light surface. Sensor noise comes in as scattered single pixels,
+  // so drop anything that isn't part of a connected run — a real edge is.
+  var mask=new Uint8Array(w*h), x, y;
+  for(y=1;y<h-1;y++) for(x=1;x<w-1;x++) if(mag[y*w+x]>=thr) mask[y*w+x]=1;
+  var pts=[];
+  for(y=2;y<h-2;y++) for(x=2;x<w-2;x++){
+    var p=y*w+x;
+    if(!mask[p]) continue;
+    var n = mask[p-w-1]+mask[p-w]+mask[p-w+1]+mask[p-1]+mask[p+1]+mask[p+w-1]+mask[p+w]+mask[p+w+1];
+    if(n>=3) pts.push(x,y);
+  }
+  return {pts:pts, mask:mask, thr:thr};
+}
+function houghLines(edges,ang,w,h){
+  var diag=Math.ceil(Math.sqrt(w*w+h*h)), R=2*diag+1, T=180, i;
+  var cs=new Float32Array(T), sn=new Float32Array(T);
+  for(i=0;i<T;i++){ cs[i]=Math.cos(i*Math.PI/180); sn[i]=Math.sin(i*Math.PI/180); }
+  var acc=new Uint32Array(T*R), pts=edges.pts;
+  for(i=0;i<pts.length;i+=2){
+    var x=pts[i], y=pts[i+1];
+    var ad=ang[y*w+x]*180/Math.PI;
+    ad=((ad%180)+180)%180;
+    for(var d=-11;d<=11;d++){
+      var t=Math.round(ad+d); t=((t%180)+180)%180;
+      var r=Math.round(x*cs[t]+y*sn[t])+diag;
+      if(r>=0&&r<R) acc[t*R+r]++;
+    }
+  }
+  var minV=Math.max(14, Math.round(Math.min(w,h)*0.16));
+  var peaks=[], t2, r2;
+  for(t2=0;t2<T;t2++) for(r2=1;r2<R-1;r2++){
+    var v=acc[t2*R+r2];
+    if(v<minV) continue;
+    if(v<acc[t2*R+r2-1]||v<acc[t2*R+r2+1]) continue;
+    peaks.push({t:t2, r:r2-diag, v:v});
+  }
+  peaks.sort(function(a,b){ return b.v-a.v; });
+  // Cap how many lines any one direction may contribute, or the print rows —
+  // all parallel, all strong — fill the list and the page's other two sides
+  // never get looked at.
+  var keep=[], rGap=Math.max(6, Math.min(w,h)*0.035), perDir={};
+  for(i=0;i<peaks.length && keep.length<44;i++){
+    var bucket=Math.round(peaks[i].t/16)%12;
+    if((perDir[bucket]||0)>=9) continue;
+    var ok=true;
+    for(var k=0;k<keep.length;k++){
+      var dt=Math.abs(peaks[i].t-keep[k].t); dt=Math.min(dt,180-dt);
+      if(dt<=7 && Math.abs(peaks[i].r-keep[k].r)<=rGap){ ok=false; break; }
+    }
+    if(ok){ keep.push(peaks[i]); perDir[bucket]=(perDir[bucket]||0)+1; }
+  }
+  // The page's own border is often the weakest line in its direction — the
+  // print beats it on votes every time — but it is always the outermost one.
+  // Put the extremes of each direction back whatever their rank.
+  var ext={};
+  for(i=0;i<peaks.length;i++){
+    var bk=Math.round(peaks[i].t/16)%12, e=ext[bk];
+    if(!e) ext[bk]={lo:peaks[i], hi:peaks[i]};
+    else { if(peaks[i].r<e.lo.r) e.lo=peaks[i]; if(peaks[i].r>e.hi.r) e.hi=peaks[i]; }
+  }
+  Object.keys(ext).forEach(function(bk){
+    [ext[bk].lo, ext[bk].hi].forEach(function(L){
+      if(keep.indexOf(L)<0) keep.push(L);
+    });
+  });
+  return keep;
+}
+function lineCross(a,b){
+  var c1=Math.cos(a.t*Math.PI/180), s1=Math.sin(a.t*Math.PI/180);
+  var c2=Math.cos(b.t*Math.PI/180), s2=Math.sin(b.t*Math.PI/180);
+  var det=c1*s2-c2*s1;
+  if(Math.abs(det)<1e-6) return null;
+  return [ (a.r*s2-b.r*s1)/det, (c1*b.r-c2*a.r)/det ];
+}
+function detectQuadEdges(g,w,h){
+  var sb=sobel(blur3(g,w,h),w,h);
+  // generous threshold: a receipt's own border is a WEAKER edge than the print
+  // inside it, especially on a light background, so it must not be thrown away
+  var edges=edgePixels(sb.mag,w,h,0.15);
+  if(edges.pts.length<200) return null;
+  var lines=houghLines(edges, sb.ang, w, h);
+  if(lines.length<4) return null;
+
+  var groups=[], i, k;
+  for(i=0;i<lines.length;i++){
+    var placed=false;
+    for(k=0;k<groups.length;k++){
+      var dt=Math.abs(lines[i].t-groups[k].t); dt=Math.min(dt,180-dt);
+      if(dt<=16){ groups[k].lines.push(lines[i]); groups[k].v+=lines[i].v; placed=true; break; }
+    }
+    if(!placed) groups.push({t:lines[i].t, v:lines[i].v, lines:[lines[i]]});
+  }
+  groups=groups.filter(function(gr){ return gr.lines.length>=2; })
+               .sort(function(a,b){ return b.v-a.v; }).slice(0,4);
+  if(groups.length<2) return null;
+
+  // Candidate sides: the strongest lines AND the outermost ones. The border of
+  // the page is often outvoted by the print, but it is always the outer line.
+  function candidates(gr){
+    var byV=gr.lines.slice().sort(function(a,b){ return b.v-a.v; }).slice(0,6);
+    var byR=gr.lines.slice().sort(function(a,b){ return a.r-b.r; });
+    var set=byV.slice();
+    [byR[0], byR[1], byR[byR.length-1], byR[byR.length-2]].forEach(function(L){
+      if(L && set.indexOf(L)<0) set.push(L);
+    });
+    return set;
+  }
+  var minSep=Math.min(w,h)*0.14, best=null, maxV=lines[0].v||1;
+
+  for(i=0;i<groups.length;i++) for(k=i+1;k<groups.length;k++){
+    var da=Math.abs(groups[i].t-groups[k].t); da=Math.min(da,180-da);
+    if(da<50||da>130) continue;
+    var A=candidates(groups[i]), B=candidates(groups[k]), a1, a2, b1, b2;
+    for(a1=0;a1<A.length;a1++) for(a2=a1+1;a2<A.length;a2++){
+      if(Math.abs(A[a1].r-A[a2].r)<minSep) continue;
+      for(b1=0;b1<B.length;b1++) for(b2=b1+1;b2<B.length;b2++){
+        if(Math.abs(B[b1].r-B[b2].r)<minSep) continue;
+        var c1=lineCross(A[a1],B[b1]), c2=lineCross(A[a1],B[b2]);
+        var c3=lineCross(A[a2],B[b2]), c4=lineCross(A[a2],B[b1]);
+        if(!c1||!c2||!c3||!c4) continue;
+        var q=orderQuad([c1,c2,c3,c4]);
+        if(!quadOk(q,w,h)) continue;
+
+        // Do the four sides actually lie on edges in the picture? (Asking
+        // instead whether the quad CONTAINS most of the edges is wrong — in a
+        // real room most of the detail is the furniture behind the receipt.)
+        var sup=sideSupport(q, edges.mask, w, h);
+        if(sup<0.55) continue;
+        var area=polyArea([q.tl,q.tr,q.br,q.bl])/(w*h);
+        var votes=(A[a1].v+A[a2].v+B[b1].v+B[b2].v)/(4*maxV);
+        var sc = Math.pow(sup,3) * (0.4+0.6*votes) * (0.35+area);
+        if(!best||sc>best.sc) best={sc:sc,q:q};
+      }
+    }
+  }
+  return best ? best.q : null;
+}
+
+/* Brightness fallback: the receipt as the largest bright blob. */
+function paperQuad(g,w,h){
+  var thr = Math.max(otsu(histOf(g), w*h), 55);
+  var lab = new Int32Array(w*h); lab.fill(-1);
+  var stack = new Int32Array(w*h);
+  var best = null, id = 0;
+  for(var s=0;s<w*h;s++){
+    if(g[s]<=thr || lab[s]>=0) continue;
+    var top=0, count=0; stack[top++]=s; lab[s]=id;
+    var minSum=1e9,maxSum=-1e9,minDif=1e9,maxDif=-1e9, c={};
+    while(top>0){
+      var q=stack[--top], y=(q/w)|0, x=q-y*w; count++;
+      var sum=x+y, dif=x-y;
+      if(sum<minSum){ minSum=sum; c.tl=[x,y]; }
+      if(sum>maxSum){ maxSum=sum; c.br=[x,y]; }
+      if(dif<minDif){ minDif=dif; c.bl=[x,y]; }
+      if(dif>maxDif){ maxDif=dif; c.tr=[x,y]; }
+      if(x>0){ var l=q-1; if(g[l]>thr&&lab[l]<0){ lab[l]=id; stack[top++]=l; } }
+      if(x<w-1){ var r=q+1; if(g[r]>thr&&lab[r]<0){ lab[r]=id; stack[top++]=r; } }
+      if(y>0){ var u=q-w; if(g[u]>thr&&lab[u]<0){ lab[u]=id; stack[top++]=u; } }
+      if(y<h-1){ var d=q+w; if(g[d]>thr&&lab[d]<0){ lab[d]=id; stack[top++]=d; } }
+    }
+    if(!best || count>best.count) best={count:count,c:c};
+    id++;
+  }
+  if(!best) return null;
+  var qd=best.c;
+  if(!quadOk(qd,w,h)) return null;
+  if(best.count < polyArea([qd.tl,qd.tr,qd.br,qd.bl])*0.72) return null; // a hand makes this fail, as it should
+  return qd;
+}
+
+function insetQuad(q,f){
+  var cx=(q.tl[0]+q.tr[0]+q.br[0]+q.bl[0])/4, cy=(q.tl[1]+q.tr[1]+q.br[1]+q.bl[1])/4;
+  var o={};
+  ["tl","tr","br","bl"].forEach(function(k){
+    o[k]=[ q[k][0]+(cx-q[k][0])*f, q[k][1]+(cy-q[k][1])*f ];
+  });
+  return o;
+}
+function solveH(from, to){
+  var A=[], i;
+  for(i=0;i<4;i++){
+    var x=from[i][0], y=from[i][1], u=to[i][0], v=to[i][1];
+    A.push([x,y,1,0,0,0,-u*x,-u*y,u]);
+    A.push([0,0,0,x,y,1,-v*x,-v*y,v]);
+  }
+  for(i=0;i<8;i++){
+    var piv=i, r, c;
+    for(r=i+1;r<8;r++) if(Math.abs(A[r][i])>Math.abs(A[piv][i])) piv=r;
+    if(Math.abs(A[piv][i])<1e-9) return null;
+    var t=A[i]; A[i]=A[piv]; A[piv]=t;
+    var d=A[i][i];
+    for(c=i;c<9;c++) A[i][c]/=d;
+    for(r=0;r<8;r++){
+      if(r===i) continue;
+      var f=A[r][i]; if(!f) continue;
+      for(c=i;c<9;c++) A[r][c]-=f*A[i][c];
+    }
+  }
+  return [A[0][8],A[1][8],A[2][8],A[3][8],A[4][8],A[5][8],A[6][8],A[7][8],1];
+}
+function sampleGray(g,w,h,u,v){
+  if(u<0)u=0; if(v<0)v=0; if(u>w-1)u=w-1; if(v>h-1)v=h-1;
+  var x0=u|0, y0=v|0;
+  var x1=x0+1<w?x0+1:x0, y1=y0+1<h?y0+1:y0;
+  var fx=u-x0, fy=v-y0;
+  var a=g[y0*w+x0], b=g[y0*w+x1], c=g[y1*w+x0], d=g[y1*w+x1];
+  return (a*(1-fx)+b*fx)*(1-fy) + (c*(1-fx)+d*fx)*fy;
+}
+function scanClean(g,w,h){
+  var ii=new Float64Array((w+1)*(h+1)), x, y, i;
+  for(y=0;y<h;y++){
+    var rs=0;
+    for(x=0;x<w;x++){ rs+=g[y*w+x]; ii[(y+1)*(w+1)+(x+1)] = ii[y*(w+1)+(x+1)] + rs; }
+  }
+  var r=Math.max(10, Math.round(Math.min(w,h)/9));
+  var flat=new Float32Array(w*h);
+  for(y=0;y<h;y++){
+    var ya=Math.max(0,y-r), yb=Math.min(h,y+r+1);
+    for(x=0;x<w;x++){
+      var xa=Math.max(0,x-r), xb=Math.min(w,x+r+1);
+      var A=ii[ya*(w+1)+xa], B=ii[ya*(w+1)+xb], C=ii[yb*(w+1)+xa], D=ii[yb*(w+1)+xb];
+      var n=(xb-xa)*(yb-ya), m=n>0?(D-B-C+A)/n:128;
+      if(m<1) m=1;
+      flat[y*w+x]=g[y*w+x]/m*220;
+    }
+  }
+  var hst=new Uint32Array(256);
+  for(i=0;i<flat.length;i++){ var qv=flat[i]|0; hst[qv<0?0:(qv>255?255:qv)]++; }
+  var acc=0, lo=0, hi=255, n2=flat.length;
+  for(i=0;i<256;i++){ acc+=hst[i]; if(acc>=n2*0.04){ lo=i; break; } }
+  acc=0;
+  for(i=0;i<256;i++){ acc+=hst[i]; if(acc>=n2*0.75){ hi=i; break; } }
+  if(hi-lo<25){ lo=0; hi=255; }
+  var span=hi-lo;
+  for(i=0;i<flat.length;i++){
+    var t=(flat[i]-lo)/span;
+    t=t<0?0:(t>1?1:t);
+    g[i]=Math.round(Math.pow(t,0.85)*255);
+  }
+}
+
+/* Render the finished scan from a working grayscale frame plus a quad. */
+function renderScan(work, quad){
+  var ww=work.w, wh=work.h, g=work.gray, out, x, y;
+  if(quad){
+    var q=insetQuad(quad,0.012);
+    var d=function(a,b){ return Math.sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])); };
+    var W=Math.max(d(q.tl,q.tr),d(q.bl,q.br)), H=Math.max(d(q.tl,q.bl),d(q.tr,q.br));
+    var oS=Math.min(1, MAX_EDGE/Math.max(W,H));
+    var ow=Math.max(8,Math.round(W*oS)), oh=Math.max(8,Math.round(H*oS));
+    var Hm=solveH([[0,0],[ow,0],[ow,oh],[0,oh]],[q.tl,q.tr,q.br,q.bl]);
+    if(Hm){
+      out={w:ow,h:oh,g:new Uint8ClampedArray(ow*oh)};
+      for(y=0;y<oh;y++) for(x=0;x<ow;x++){
+        var dn=Hm[6]*x+Hm[7]*y+Hm[8];
+        out.g[y*ow+x]=sampleGray(g,ww,wh,(Hm[0]*x+Hm[1]*y+Hm[2])/dn,(Hm[3]*x+Hm[4]*y+Hm[5])/dn);
+      }
+    }
+  }
+  if(!out){
+    var s2=Math.min(1, MAX_EDGE/Math.max(ww,wh));
+    var ow2=Math.max(8,Math.round(ww*s2)), oh2=Math.max(8,Math.round(wh*s2));
+    out={w:ow2,h:oh2,g:new Uint8ClampedArray(ow2*oh2)};
+    for(y=0;y<oh2;y++) for(x=0;x<ow2;x++) out.g[y*ow2+x]=sampleGray(g,ww,wh,x/s2,y/s2);
+  }
+  scanClean(out.g,out.w,out.h);
+  var oc=document.createElement("canvas"); oc.width=out.w; oc.height=out.h;
+  var octx=oc.getContext("2d");
+  var img=octx.createImageData(out.w,out.h);
+  for(var i=0,p=0;p<out.g.length;p++,i+=4){
+    var vv=out.g[p]; img.data[i]=vv; img.data[i+1]=vv; img.data[i+2]=vv; img.data[i+3]=255;
+  }
+  octx.putImageData(img,0,0);
+  return new Promise(function(res){
+    oc.toBlob(function(b){ res(b); }, "image/jpeg", 0.78);
+  });
+}
+
+function processImage(file){
+  return loadBitmap(file).then(function(src){
+    var sw=src.width||src.naturalWidth, sh=src.height||src.naturalHeight;
+    if(!sw||!sh) throw new Error("no image");
+    var wScale=Math.min(1, 2200/Math.max(sw,sh));
+    var ww=Math.max(1,Math.round(sw*wScale)), wh=Math.max(1,Math.round(sh*wScale));
+    var wc=document.createElement("canvas"); wc.width=ww; wc.height=wh;
+    var wctx=wc.getContext("2d",{willReadFrequently:true});
+    wctx.imageSmoothingQuality="high";
+    wctx.drawImage(src,0,0,ww,wh);
+    if(src.close) try{ src.close(); }catch(e){}
+    var work={gray:grayOf(wctx.getImageData(0,0,ww,wh).data,ww,wh), w:ww, h:wh};
+
+    var aScale=Math.min(1, 440/Math.max(ww,wh));
+    var aw=Math.max(1,Math.round(ww*aScale)), ah=Math.max(1,Math.round(wh*aScale));
+    var ac=document.createElement("canvas"); ac.width=aw; ac.height=ah;
+    var actx=ac.getContext("2d",{willReadFrequently:true});
+    actx.drawImage(wc,0,0,aw,ah);
+    var agray=grayOf(actx.getImageData(0,0,aw,ah).data,aw,ah);
+
+    var q=null;
+    try{ q=detectQuadPaper(adat,aw,ah); }catch(e){ q=null; }
+    if(!q){ try{ q=detectQuadEdges(agray,aw,ah); }catch(e){ q=null; } }
+    if(!q){ try{ q=paperQuad(agray,aw,ah); }catch(e){ q=null; } }
+    var quad=null;
+    if(q){
+      var k=1/aScale;
+      quad={ tl:[q.tl[0]*k,q.tl[1]*k], tr:[q.tr[0]*k,q.tr[1]*k],
+             br:[q.br[0]*k,q.br[1]*k], bl:[q.bl[0]*k,q.bl[1]*k] };
+    }
+    return renderScan(work, quad).then(function(b){
+      return {blob:b||file, work:work, quad:quad, flattened:!!quad};
+    });
+  }).catch(function(){
+    return {blob:file, work:null, quad:null, flattened:false};
+  });
+}
+
+/* ============================ OCR ============================ */
+var ITEM_RULES =
+  "items — one entry per purchased line, in printed order:\n" +
+  "- text: the description EXACTLY as printed, abbreviations and misspellings kept. Never expand, correct or tidy it.\n" +
+  "- code: the UPC or SKU printed beside that line, digits only, or null.\n" +
+  "- price: the extended price for that line (what it added to the bill), plain number, or null.\n" +
+  "- Leave out subtotal, tax, total, change, tender, card, savings and store-message lines. Those are not items.\n" +
+  "- clear: true only if the printed text by itself would tell the shopper what the product actually is six months from now. " +
+  'An abbreviation ("CG TP TTL 2P"), a bare code, or a word too vague to identify the thing ("ORGANIZER", "MISC HARDWARE") is false.\n' +
+  "- guess: if clear is false and the abbreviation has a likely plain-English reading, put it here as a short product name " +
+  '(a store shorthand like "CG TP TTL 2P" often unpacks to a brand, a product and a pack size). ' +
+  "If you would only be guessing wildly, use null. Never put a guess in text.\n" +
+  "- If the item lines are not legible, use an empty array.";
+
+var OCR_PROMPT =
+  "This is a photo of a purchase receipt from a store, taken by a construction project manager. " +
+  "Read only what is actually printed on it. Do not guess or fill in anything that is not legible.\n\n" +
+  "Reply with ONLY a JSON object, no other text, in exactly this shape:\n" +
+  '{"vendor": string|null, "date": "YYYY-MM-DD"|null, "total": number|null, "tax": number|null, ' +
+  '"receiptNo": string|null, "cardLast4": string|null, "confidence": "high"|"low", "unreadable": boolean, "problem": string|null, ' +
+  '"items": [{"text": string, "code": string|null, "price": number|null, "clear": boolean, "guess": string|null}]}\n\n' +
+  "Rules:\n" +
+  "- vendor: the store name as printed (Lowe's, The Home Depot, Ace Hardware, a lumber yard, a gas station).\n" +
+  "- total: the final amount charged, as a plain number with no currency symbol. If subtotal and total both appear, take the total.\n" +
+  "- tax: sales tax only, if printed. null otherwise.\n" +
+  "- Any field you cannot read clearly must be null. A null is correct; a guess is not.\n" +
+  '- confidence is "low" if the image is blurry, cut off, badly lit, or you are unsure of vendor or total.\n' +
+  "- unreadable is true only if this is not a legible receipt at all.\n" +
+  "- problem: one short phrase saying what is wrong, or null if nothing is.\n\n" +
+  ITEM_RULES;
+
+/* A supply-house invoice is a different document from a till receipt and the
+   differences matter: it is billed to an account rather than a card, it names
+   the job it was delivered to, its total may sit several pages in, and it is a
+   bill rather than proof of payment. Measured against a real Builders
+   FirstSource invoice: ship-to and JOB NO both identify the job, TERMS and DUE
+   DATE are printed, and one invoice spanned two budget divisions. */
+var DOC_PROMPT =
+  "These images are one purchase document belonging to a construction company — " +
+  "either a till receipt from a store, or an invoice from a supply house or lumber yard. " +
+  "If there are several images they are consecutive pages of the SAME document; read them " +
+  "together and report one set of figures for the whole thing.\n\n" +
+  "Read only what is actually printed. Do not guess or fill in anything illegible.\n\n" +
+  "Reply with ONLY a JSON object, no other text, in exactly this shape:\n" +
+  '{"docType": "receipt"|"invoice", "vendor": string|null, "date": "YYYY-MM-DD"|null, ' +
+  '"total": number|null, "tax": number|null, "receiptNo": string|null, "invoiceNo": string|null, ' +
+  '"jobCode": string|null, "shipTo": string|null, "terms": string|null, "dueDate": "YYYY-MM-DD"|null, ' +
+  '"pageLabel": string|null, "cardLast4": string|null, "confidence": "high"|"low", ' +
+  '"unreadable": boolean, "problem": string|null, ' +
+  '"items": [{"text": string, "code": string|null, "price": number|null, "clear": boolean, "guess": string|null}]}\n\n' +
+  "Rules:\n" +
+  '- docType: "invoice" if the document is headed INVOICE, bills to an account, or shows ' +
+  'payment terms or a due date. "receipt" if it records a completed sale at a till.\n' +
+  "- vendor: the business name as printed (Lowe's, The Home Depot, Builders FirstSource, a gas station).\n" +
+  "- total: the single final amount for the whole document, plain number, no currency symbol. " +
+  "On a multi-page document this is the total on the LAST page, not a per-page subtotal.\n" +
+  "- tax: sales tax only. null otherwise.\n" +
+  "- invoiceNo: the invoice number, for an invoice. receiptNo: the receipt or transaction number, " +
+  "for a receipt. Fill the one that applies and leave the other null.\n" +
+  '- jobCode: the job, order or cost-code reference the supplier prints for this delivery ' +
+  '(often under a heading like JOB NO or CUST. ORDER NO), exactly as printed. null if absent.\n' +
+  "- shipTo: the delivery name and street address as one line, if a ship-to block is printed. " +
+  "This is often how the job is identified, so copy it faithfully.\n" +
+  '- terms: payment terms exactly as printed (e.g. "N25TH", "Net 30"). dueDate: the due date if printed.\n' +
+  '- pageLabel: any page marking as printed (e.g. "PG 1", "1 of 3"), from the first page. null if absent.\n' +
+  "- cardLast4: the last four digits of a card, if one was used. An account invoice has none — use null.\n" +
+  "- Any field you cannot read clearly must be null. A null is correct; a guess is not.\n" +
+  '- confidence is "low" if an image is blurry, cut off, badly lit, or you are unsure of vendor or total.\n' +
+  "- unreadable is true only if this is not a legible purchase document at all.\n" +
+  "- problem: one short phrase saying what is wrong, or null.\n\n" +
+  ITEM_RULES;
+
+var ITEMS_ONLY_PROMPT =
+  "This is a photo of a purchase receipt from a store. Read only what is actually printed on it.\n\n" +
+  "Reply with ONLY a JSON object, no other text, in exactly this shape:\n" +
+  '{"items": [{"text": string, "code": string|null, "price": number|null, "clear": boolean, "guess": string|null}]}\n\n' +
+  ITEM_RULES;
+
+/* ============================ cards ============================
+   The reader sees a card's last four on most receipts. Tell the app once which
+   payment method that card is and it fills the column in from then on. */
+function methodForCard(last4){
+  if(!last4) return null;
+  return S.cards[String(last4)] || null;
+}
+/* ============================ job codes ============================
+   A supply house prints its own reference for the job it delivered to --
+   Builders FirstSource prints JOB NO 1202LOUI for 1202 Louise Lane. Told once
+   which job that is, the app routes later invoices from the same yard by
+   itself. Unlike a receipt, an invoice knows where it went. */
+function jobForCode(code){
+  if(!code) return null;
+  var k = normCode(code);
+  var id = S.jobCodes[k];
+  if(!id) return null;
+  for(var i=0;i<S.jobs.length;i++) if(S.jobs[i].id === id) return S.jobs[i];
+  return null;
+}
+function normCode(code){
+  return String(code).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+function saveJobCode(code, jobId){
+  if(!code || !jobId || !S.db) return Promise.resolve();
+  var k = normCode(code);
+  S.jobCodes[k] = jobId;
+  return S.db.doc("jobcodes/"+k).set({ code:String(code), jobId:jobId,
+    updatedAt:new Date().toISOString() }).catch(function(){});
+}
+
+/* The paper copy and the copy Joe forwards are the same invoice. Vendor plus
+   invoice number identifies it; vendor is normalised because the reader may
+   print it slightly differently between two scans of the same letterhead. */
+function findInvoiceTwin(selfId, vendor, invoiceNo){
+  if(!invoiceNo) return null;
+  var want = normCode(invoiceNo), v = normVendor(vendor);
+  var rows = allRows();
+  for(var i=0;i<rows.length;i++){
+    var r = rows[i];
+    if(r.id === selfId) continue;
+    var no = r.invoiceNo || (r.ocr && r.ocr.invoiceNo);
+    if(!no || normCode(no) !== want) continue;
+    if(v && normVendor(r.vendor) && normVendor(r.vendor) !== v) continue;
+    return r.id;
+  }
+  return null;
+}
+function normVendor(v){
+  return v ? String(v).toLowerCase().replace(/[^a-z0-9]/g, "") : "";
+}
+
+function saveCard(last4, method){
+  if(!last4 || !method || !S.db) return Promise.resolve();
+  S.cards[String(last4)] = method;
+  return S.db.doc("cards/"+last4).set({ last4:String(last4), method:method, updatedAt:new Date().toISOString() })
+    .catch(function(){});
+}
+
+/* ============================ divisions ============================
+   A job's cost estimate is the authority. Its Receipts tab feeds the Paid
+   column through SUMIFS keyed on the Division string, so a division here has
+   to be one of the estimate's own strings, character for character — a near
+   miss doesn't error, it just silently fails to count. The estimate also
+   pairs each division with a subcontractor, which is what lets a vendor on a
+   receipt narrow 38 divisions down to one or two. */
+
+function divisionsFor(jobId){
+  var d = S.divisions[jobId];
+  return (d && d.rows && d.rows.length) ? d.rows : null;
+}
+/* Vendor names arrive spelled every which way: "LOWE'S", "Lowes",
+   "BUILDERS FIRSTSOURCE". Squashing to bare letters and digits lets those
+   meet the estimate's spelling without a fuzzy-match library. */
+function squash(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,""); }
+function sameVendor(a, b){
+  var x = squash(a), y = squash(b);
+  if(!x || !y || x.length < 3 || y.length < 3) return false;
+  return x === y || x.indexOf(y) >= 0 || y.indexOf(x) >= 0;
+}
+function suggestDivisions(rows, vendor){
+  if(!vendor) return [];
+  return rows.filter(function(r){ return sameVendor(r.s, vendor); });
+}
+function divisionEst(jobId, name){
+  var rows = divisionsFor(jobId);
+  if(!rows) return null;
+  for(var i=0;i<rows.length;i++) if(rows[i].d === name) return rows[i].e;
+  return null;
+}
+
+/* ============================ line items ============================
+   A receipt is a poor record of what was bought: "BS ORGANIZER" means nothing
+   six months later. We keep every printed line verbatim, flag the ones that
+   won't survive the memory gap, and let him name those once. The name is
+   stored against the UPC so the same product never has to be named twice. */
+
+function normItemText(s){
+  return String(s||"").toUpperCase().replace(/[^A-Z0-9 ]+/g," ").replace(/\s+/g," ").trim();
+}
+function aliasKey(it){
+  if(!it) return null;
+  var code = String(it.code||"").replace(/\D/g,"");
+  if(code.length >= 6) return ("c_" + code).slice(0,64);
+  var t = normItemText(it.text);
+  if(t.length < 2) return null;
+  return ("t_" + t.replace(/ /g,"_")).slice(0,64);
+}
+/* A printed line is readable if plain words carry it. One long word with a
+   vowel, or two ordinary words, is enough; "CG TP TTL 2P" clears neither bar.
+   This is only a fallback — the reader's own `clear` judgment wins when given. */
+function looksCryptic(text){
+  var t = normItemText(text);
+  if(!t) return true;
+  var toks = t.split(" "), wordy = 0, longest = 0;
+  for(var i=0;i<toks.length;i++){
+    var k = toks[i];
+    if(/^\d+$/.test(k)) continue;
+    if(k.length >= 4 && /[AEIOU]/.test(k)){ wordy++; if(k.length > longest) longest = k.length; }
+  }
+  return !(wordy >= 2 || longest >= 6);
+}
+function cleanItems(raw){
+  if(!raw || !raw.length) return [];
+  var out = [];
+  for(var i=0;i<raw.length && out.length<MAX_ITEMS;i++){
+    var it = raw[i] || {};
+    var text = it.text==null ? "" : String(it.text).slice(0,60).trim();
+    if(!text) continue;
+    if(/^(sub\s*total|subtotal|total|tax|change|tender|cash|debit|credit|balance|savings|you saved|visa|mastercard|amex|discover)\b/i.test(text)) continue;
+    var price = it.price==null ? null : parseFloat(String(it.price).replace(/[^0-9.\-]/g,""));
+    if(price!=null && isNaN(price)) price = null;
+    var clear = typeof it.clear === "boolean" ? it.clear : !looksCryptic(text);
+    out.push({
+      text: text,
+      code: it.code ? String(it.code).replace(/\D/g,"").slice(0,20) || null : null,
+      price: price,
+      clear: clear,
+      guess: (!clear && it.guess) ? String(it.guess).slice(0,60) : null,
+      name: null
+    });
+  }
+  return out;
+}
+/* Fill in names already learned. Returns how many are still unnamed and unclear. */
+function applyAliases(items){
+  var open = 0;
+  (items||[]).forEach(function(it){
+    if(!it.name){
+      var k = aliasKey(it);
+      if(k && S.aliases[k]) it.name = S.aliases[k];
+    }
+    if(!it.name && !it.clear) open++;
+  });
+  return open;
+}
+function itemLabel(it){ return (it && (it.name || it.text)) || ""; }
+function openNameCount(items){
+  var n = 0;
+  (items||[]).forEach(function(it){ if(!it.name && !it.clear) n++; });
+  return n;
+}
+function itemsSum(items){
+  var s = 0, any = false;
+  (items||[]).forEach(function(it){ if(it.price!=null){ s += it.price; any = true; } });
+  return any ? s : null;
+}
+
+/* Learn a name. Written against the UPC where there is one, so it carries to
+   every future receipt, and back-filled onto receipts already filed. */
+function saveAlias(it, name){
+  var k = aliasKey(it);
+  if(!k || !name || !S.db) return Promise.resolve();
+  S.aliases[k] = name;
+  return S.db.doc("aliases/"+k).set({
+    key:k, text:it.text, code:it.code||null, name:name, updatedAt:new Date().toISOString()
+  }).then(function(){ backfillAlias(k, name); }).catch(function(){});
+}
+function backfillAlias(key, name){
+  var hits = S.receipts.filter(function(r){
+    if(!r.items || !r.items.length) return false;
+    return r.items.some(function(it){ return !it.name && aliasKey(it) === key; });
+  }).slice(0,25);
+  hits.forEach(function(r){
+    var items = r.items.map(function(it){
+      var c = Object.assign({}, it);
+      if(!c.name && aliasKey(c) === key) c.name = name;
+      return c;
+    });
+    S.db.doc("receipts/"+r.id).update({ items:items, openNames: openNameCount(items) }).catch(function(){});
+  });
+}
+
+function runOcr(id, blob, dest){
+  if(!S.sample || !S.canImages) return;
+  /* every page of the document, so the total on the last page is the one read */
+  var imgs = [blob].concat((dest && dest.morePages) || []);
+  S.sample.json(DOC_PROMPT, { images:imgs, modelTier:"default" }).then(function(r){
+    if(!r || typeof r !== "object") throw new Error("shape");
+    var num = function(v){
+      if(v==null) return null;
+      var n = typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.\-]/g,""));
+      return isNaN(n) ? null : n;
+    };
+    var ocr = {
+      vendor: r.vendor ? String(r.vendor).slice(0,80) : null,
+      date: /^\d{4}-\d{2}-\d{2}$/.test(r.date||"") ? r.date : null,
+      total: num(r.total),
+      tax: num(r.tax),
+      receiptNo: r.receiptNo ? String(r.receiptNo).slice(0,40) : null,
+      cardLast4: r.cardLast4 ? String(r.cardLast4).replace(/\D/g,"").slice(-4) : null,
+      confidence: r.confidence === "high" ? "high" : "low",
+      unreadable: !!r.unreadable,
+      problem: r.problem ? String(r.problem).slice(0,120) : null,
+      docType: r.docType === "invoice" ? "invoice" : "receipt",
+      invoiceNo: r.invoiceNo ? String(r.invoiceNo).slice(0,40) : null,
+      jobCode: r.jobCode ? String(r.jobCode).trim().slice(0,40) : null,
+      shipTo: r.shipTo ? String(r.shipTo).slice(0,160) : null,
+      terms: r.terms ? String(r.terms).slice(0,40) : null,
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(r.dueDate||"") ? r.dueDate : null,
+      pageLabel: r.pageLabel ? String(r.pageLabel).slice(0,24) : null
+    };
+    var items = cleanItems(r.items);
+    applyAliases(items);
+    var shaky = ocr.unreadable || ocr.confidence !== "high" || ocr.total == null || !ocr.vendor;
+    var patch = {
+      ocr: ocr,
+      vendor: ocr.vendor,
+      date: ocr.date || todayISO(),
+      total: ocr.total,
+      tax: ocr.tax,
+      receiptNo: ocr.receiptNo,
+      docType: ocr.docType,
+      invoiceNo: ocr.invoiceNo,
+      jobCode: ocr.jobCode,
+      terms: ocr.terms,
+      dueDate: ocr.dueDate,
+      items: items,
+      openNames: openNameCount(items),
+      status: shaky ? "review" : "ok",
+      reviewReason: shaky ? (ocr.problem || (ocr.total==null ? "Couldn't read the total" : "Not a confident read")) : null
+    };
+    /* a card the app has been told about fills in the payment method */
+    var known = methodForCard(ocr.cardLast4);
+    if(known) patch.method = known;
+    /* an account invoice has no card; say how it was bought rather than blank */
+    if(!patch.method && ocr.docType === "invoice"){
+      patch.method = "On account" + (ocr.terms ? " (" + ocr.terms + ")" : "");
+    }
+
+    /* a job code the app has seen before routes the invoice by itself */
+    var coded = jobForCode(ocr.jobCode);
+    if(coded && dest && dest.kind === "job" && coded.id !== dest.jobId){
+      patch.jobCodeMismatch = coded.name;   /* surfaced in review, never silently moved */
+    }
+
+    /* a second copy of the same invoice -- the paper one and the one Joe
+       forwards -- must not both land. Vendor plus invoice number is the key. */
+    if(ocr.docType === "invoice" && ocr.invoiceNo){
+      var twin = findInvoiceTwin(id, ocr.vendor, ocr.invoiceNo);
+      if(twin){
+        patch.status = "review";
+        patch.dupOf = twin;
+        patch.reviewReason = "Invoice " + ocr.invoiceNo + " is already captured";
+      }
+    }
+
+    /* a job with an imported estimate wants a division on every receipt */
+    if(dest && dest.kind === "job"){
+      var drows = divisionsFor(dest.jobId);
+      if(drows){
+        var sug = suggestDivisions(drows, ocr.vendor);
+        if(sug.length === 1){ patch.division = sug[0].d; patch.divisionAuto = true; patch.openDivision = false; }
+        else { patch.division = null; patch.openDivision = true; }
+      }
+    }
+    var dup = findDuplicate(id, patch);
+    if(dup){ patch.status = "review"; patch.reviewReason = "Looks like a duplicate of another receipt"; patch.dupOf = dup; }
+    return S.db.doc("receipts/"+id).update(patch);
+  }).catch(function(e){
+    var code = e && e.code;
+    var reason = code === "not_granted" ? "Reading is turned off — enter it by hand"
+               : code === "rate_limited" ? "Reader was busy — enter it by hand"
+               : "Couldn't read this one — enter it by hand";
+    S.db.doc("receipts/"+id).update({status:"review", reviewReason:reason, ocrFailed:true}).catch(function(){});
+  });
+}
+
+function findDuplicate(id, patch){
+  if(patch.total == null || !patch.vendor) return null;
+  for(var i=0;i<S.receipts.length;i++){
+    var r = S.receipts[i];
+    if(r.id === id) continue;
+    if(r.total == null || !r.vendor) continue;
+    if(Math.abs(r.total - patch.total) > 0.005) continue;
+    if(String(r.vendor).toLowerCase() !== String(patch.vendor).toLowerCase()) continue;
+    var a = new Date(r.date || r.capturedAt).getTime();
+    var b = new Date(patch.date).getTime();
+    if(isFinite(a) && isFinite(b) && Math.abs(a-b) <= 3*864e5) return r.id;
+  }
+  return null;
+}
+
+/* ============================ diagnostics ============================ */
+var DIAG = {};
+function diag(key, msg, isErr){
+  if(msg == null) delete DIAG[key];
+  else DIAG[key] = {t:msg, e:!!isErr};
+  var d = $("diag"); if(!d) return;
+  var keys = Object.keys(DIAG);
+  d.innerHTML = "";
+  if(!keys.length){ d.hidden = true; return; }
+  keys.forEach(function(k){ d.appendChild(el("div", DIAG[k].e ? "err" : null, DIAG[k].t)); });
+  d.hidden = false;
+}
+/* ============================ PDF intake ============================
+   The iPhone's document scanner produces a PDF, not a photo, and a supply
+   invoice almost always arrives that way. pdf.js renders each page to a JPEG
+   and the rest of the pipeline carries on as if they were photographs.
+
+   Two things matter here. The worker is loaded through a blob URL built from
+   the fetched script, because a cross-origin worker is refused in a framed
+   page and this page runs framed. And a scanned PDF is ALREADY cropped and
+   deskewed by iOS, so the receipt-corner detector must not run on it -- it
+   would hunt for paper edges in an image that is nothing but paper. */
+var PDFJS_VER = "3.11.174";
+var PDFJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/" + PDFJS_VER + "/";
+var PDF_TARGET_EDGE = 2000;   /* render size; processImage downscales from here */
+var PDF_MAX_PAGES = 8;
+var pdfLibPromise = null;
+
+function loadPdfLib(){
+  if(pdfLibPromise) return pdfLibPromise;
+  pdfLibPromise = new Promise(function(resolve, reject){
+    var s = document.createElement("script");
+    s.src = PDFJS_BASE + "pdf.min.js";
+    s.onload = function(){
+      var lib = window.pdfjsLib;
+      if(!lib) return reject(new Error("pdf.js did not define itself"));
+      fetch(PDFJS_BASE + "pdf.worker.min.js")
+        .then(function(r){ if(!r.ok) throw new Error("worker " + r.status); return r.blob(); })
+        .then(function(b){ lib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(b); })
+        .catch(function(){ lib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js"; })
+        .then(function(){ resolve(lib); });
+    };
+    s.onerror = function(){ reject(new Error("could not load the PDF reader")); };
+    document.head.appendChild(s);
+  });
+  return pdfLibPromise;
+}
+
+function isPdf(file){
+  return !!file && (file.type === "application/pdf" ||
+                    /\.pdf$/i.test(file.name || ""));
+}
+
+/* -> Promise of [Blob] , one JPEG per page */
+function pdfToImages(file){
+  return loadPdfLib().then(function(lib){
+    return file.arrayBuffer().then(function(buf){
+      return lib.getDocument({ data: new Uint8Array(buf) }).promise;
+    });
+  }).then(function(doc){
+    var n = Math.min(doc.numPages, PDF_MAX_PAGES);
+    var out = [], chain = Promise.resolve();
+    for(var i = 1; i <= n; i++){
+      (function(pageNo){
+        chain = chain.then(function(){
+          return doc.getPage(pageNo).then(function(page){
+            var v1 = page.getViewport({ scale: 1 });
+            var scale = Math.min(3, PDF_TARGET_EDGE / Math.max(v1.width, v1.height));
+            var vp = page.getViewport({ scale: Math.max(1, scale) });
+            var cv = document.createElement("canvas");
+            cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+            var ctx = cv.getContext("2d");
+            ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+            return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function(){
+              return new Promise(function(res){
+                cv.toBlob(function(b){ out.push(b); res(); }, "image/jpeg", 0.92);
+              });
+            });
+          });
+        });
+      })(i);
+    }
+    return chain.then(function(){
+      return { pages: out, total: doc.numPages, used: n };
+    });
+  });
+}
+
+function takeFrom(inp, via){
+  if(!inp) return;
+  var files = [];
+  try{ files = inp.files ? Array.prototype.slice.call(inp.files) : []; }catch(e){}
+  if(!files.length) return;
+  try{ inp.value = ""; }catch(e){}
+
+  var f = files[0];
+  var kb = Math.round(f.size/1024);
+
+  if(isPdf(f)){
+    diag("camera", "Reading PDF (" + via + ", " + kb + " KB)…");
+    pdfToImages(f).then(function(r){
+      if(r.total > r.used){
+        diag("camera", "This PDF has " + r.total + " pages; reading the first " +
+             r.used + ".", true);
+      } else {
+        diag("camera", null);
+      }
+      capture(r.pages[0], { pages:r.pages, scanned:true, pageCount:r.total,
+                            sourceName:f.name || "scan.pdf" });
+    }).catch(function(e){
+      diag("camera", "Couldn't read that PDF: " + (e && e.message || e) +
+           ". Exporting it as a photo from the Files app will work.", true);
+    });
+    return;
+  }
+
+  /* several photos of one multi-page document */
+  if(files.length > 1){
+    diag("camera", files.length + " images received (" + via + ")");
+    capture(f, { pages:files, scanned:false, pageCount:files.length });
+    return;
+  }
+
+  diag("camera", "Photo received (" + via + ", " + kb + " KB)");
+  capture(f);
+}
+
+/* ============================ save + upload ============================ */
+function capture(file, opts){
+  if(!file) return;
+  opts = opts || {};
+  try{
+    S.pending = { file:file, blob:null, url:URL.createObjectURL(file), ready:false,
+                  pages: opts.pages && opts.pages.length > 1 ? opts.pages : null,
+                  pageCount: opts.pageCount || 1,
+                  scanned: !!opts.scanned,
+                  sourceName: opts.sourceName || null };
+    openPicker();
+    if(!opts.pages) diag("camera", null);
+  }catch(e){
+    diag("camera", "Couldn't open the job picker: " + (e && e.message || e), true);
+    return;
+  }
+
+  /* A page out of the iPhone's scanner is already cropped square and
+     flattened. Hunting for paper corners in an image that is entirely paper
+     finds nothing useful and can crop into the print, so skip straight to
+     the cleanup pass. */
+  var work = opts.scanned ? passThroughImage(file) : processImage(file);
+
+  work.then(function(res){
+    if(!S.pending) return;
+    S.pending.blob = res.blob; S.pending.ready = true;
+    S.pending.work = res.work; S.pending.quad = res.quad;
+    showScanPreview();
+    if(S.pending.commitWhenReady) commitPending(S.pending.commitWhenReady);
+  }).catch(function(e){
+    diag("process", "Couldn't process the image: " + (e && e.message || e), true);
+    if(S.pending){
+      S.pending.blob = file; S.pending.ready = true;
+      if(S.pending.commitWhenReady) commitPending(S.pending.commitWhenReady);
+    }
+  });
+}
+
+/* An already-rectified page: downscale to the working size and keep it. */
+function passThroughImage(file){
+  return loadBitmap(file).then(function(src){
+    var W = src.width, H = src.height;
+    var s = Math.min(1, MAX_EDGE / Math.max(W, H));
+    var cv = document.createElement("canvas");
+    cv.width = Math.round(W * s); cv.height = Math.round(H * s);
+    var ctx = cv.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(src, 0, 0, cv.width, cv.height);
+    return new Promise(function(res){
+      cv.toBlob(function(b){
+        res({ blob: b || file, work: cv, quad: null });
+      }, "image/jpeg", 0.9);
+    });
+  });
+}
+
+function showScanPreview(){
+  var p = S.pending; if(!p || !p.blob) return;
+  try{
+    var url = URL.createObjectURL(p.blob);
+    var im = document.querySelector("#pick-preview img");
+    if(im) im.src = url;
+    if(p.scanUrl) URL.revokeObjectURL(p.scanUrl);
+    p.scanUrl = url;
+    var cap = document.querySelector("#pick-preview .t");
+    if(cap){
+      cap.innerHTML = "";
+      var n = 1 + ((p.pages && p.pages.length > 1) ? p.pages.length - 1 : 0);
+      cap.appendChild(document.createTextNode(
+        n > 1 ? (n + " pages ready.")
+              : (p.quad ? "Squared up and cleaned." : "Cleaned up, but the edges weren't found.")));
+      if(p.work){
+        var btn = el("button","edgebtn", p.quad ? "Adjust edges" : "Set the edges");
+        btn.onclick = openEdges;
+        cap.appendChild(document.createElement("br"));
+        cap.appendChild(btn);
+      }
+      /* A paper invoice can run to two or three sheets. Shoot them one after
+         another before picking the job; they stay one record. */
+      var more = el("label","edgebtn",
+        n > 1 ? "Add another page (" + n + " so far)" : "This invoice has another page");
+      more.setAttribute("for", "pagein");
+      more.style.marginLeft = p.work ? "14px" : "0";
+      cap.appendChild(more);
+    }
+  }catch(e){}
+}
+
+/* ---------------- manual corner adjustment ---------------- */
+var EDIT = null;
+function openEdges(){
+  var p = S.pending;
+  if(!p || !p.work || !p.file) return;
+  var q = p.quad || insetQuad({tl:[0,0],tr:[p.work.w,0],br:[p.work.w,p.work.h],bl:[0,p.work.h]}, 0.12);
+  EDIT = { pts:{ tl:q.tl.slice(), tr:q.tr.slice(), br:q.br.slice(), bl:q.bl.slice() }, drag:null };
+  var img = $("edge-img");
+  img.src = p.origUrl || (p.origUrl = URL.createObjectURL(p.file));
+  $("sheet-edges").hidden = false;
+  img.onload = drawEdges;
+  if(img.complete) setTimeout(drawEdges, 30);
+}
+function edgeScale(){
+  var img = $("edge-img"), p = S.pending;
+  if(!img || !p || !p.work) return 1;
+  return img.clientWidth / p.work.w;
+}
+function drawEdges(){
+  if(!EDIT) return;
+  var img = $("edge-img"), sc = edgeScale();
+  var svg = $("edge-svg");
+  svg.setAttribute("width", img.clientWidth);
+  svg.setAttribute("height", img.clientHeight);
+  svg.style.width = img.clientWidth + "px";
+  svg.style.height = img.clientHeight + "px";
+  var P = EDIT.pts;
+  var d = ["tl","tr","br","bl"].map(function(k,i){
+    return (i?"L":"M") + (P[k][0]*sc) + " " + (P[k][1]*sc);
+  }).join(" ") + " Z";
+  $("edge-path").setAttribute("d", d);
+  ["tl","tr","br","bl"].forEach(function(k){
+    var c = $("h-"+k);
+    c.setAttribute("cx", P[k][0]*sc);
+    c.setAttribute("cy", P[k][1]*sc);
+  });
+}
+function edgePoint(ev){
+  var img = $("edge-img"), r = img.getBoundingClientRect();
+  var t = ev.touches && ev.touches[0] ? ev.touches[0] : ev;
+  return { x:(t.clientX-r.left)/edgeScale(), y:(t.clientY-r.top)/edgeScale() };
+}
+function wireEdges(){
+  var area = $("edge-area");
+  function down(ev){
+    if(!EDIT) return;
+    var pt = edgePoint(ev), best=null, bd=1e9;
+    ["tl","tr","br","bl"].forEach(function(k){
+      var dx=EDIT.pts[k][0]-pt.x, dy=EDIT.pts[k][1]-pt.y, dd=dx*dx+dy*dy;
+      if(dd<bd){ bd=dd; best=k; }
+    });
+    var tol = (S.pending && S.pending.work ? S.pending.work.w : 1000) * 0.18;
+    if(Math.sqrt(bd) > tol) return;
+    EDIT.drag = best; ev.preventDefault();
+  }
+  function move(ev){
+    if(!EDIT||!EDIT.drag) return;
+    var pt = edgePoint(ev), w = S.pending.work.w, h = S.pending.work.h;
+    EDIT.pts[EDIT.drag] = [ Math.max(0,Math.min(w,pt.x)), Math.max(0,Math.min(h,pt.y)) ];
+    drawEdges(); ev.preventDefault();
+  }
+  function up(){ if(EDIT) EDIT.drag=null; }
+  area.addEventListener("touchstart", down, {passive:false});
+  area.addEventListener("touchmove", move, {passive:false});
+  area.addEventListener("touchend", up);
+  area.addEventListener("mousedown", down);
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+  window.addEventListener("resize", function(){ if(EDIT) drawEdges(); });
+
+  $("edge-cancel").onclick = function(){ EDIT=null; $("sheet-edges").hidden = true; };
+  $("edge-full").onclick = function(){
+    if(!EDIT||!S.pending) return;
+    var w=S.pending.work.w, h=S.pending.work.h;
+    EDIT.pts={tl:[0,0],tr:[w,0],br:[w,h],bl:[0,h]};
+    drawEdges();
+  };
+  $("edge-apply").onclick = function(){
+    if(!EDIT||!S.pending) return;
+    var q = {tl:EDIT.pts.tl,tr:EDIT.pts.tr,br:EDIT.pts.br,bl:EDIT.pts.bl};
+    $("edge-apply").disabled = true;
+    $("edge-apply").textContent = "Working…";
+    renderScan(S.pending.work, q).then(function(b){
+      if(S.pending && b){ S.pending.blob=b; S.pending.quad=q; showScanPreview(); }
+      EDIT=null;
+      $("sheet-edges").hidden = true;
+      $("edge-apply").disabled = false;
+      $("edge-apply").textContent = "Use these edges";
+    }).catch(function(){
+      $("edge-apply").disabled = false;
+      $("edge-apply").textContent = "Use these edges";
+      toast("Couldn't redo the scan");
+    });
+  };
+}
+
+function fileReceipt(dest){
+  // dest: {jobId, jobName, kind, category}
+  if(!S.pending) return;
+  rememberJob(dest.jobId);
+  closePicker(true);
+  if(S.pending.ready) commitPending(dest);
+  else { S.pending.commitWhenReady = dest; toast("Filing…"); }
+}
+
+function commitPending(dest){
+  var p = S.pending; if(!p) return;
+  S.pending = null;
+  var item = {
+    localId: uid(),
+    blob: p.blob || p.file,
+    /* pages 2..n of a multi-page document, raw. Page 1 is `blob`, already
+       cleaned up; the rest ride along so the reader sees the whole invoice. */
+    morePages: p.pages ? p.pages.slice(1) : null,
+    pageCount: p.pageCount || 1,
+    scanned: !!p.scanned,
+    jobId: dest.jobId, jobName: dest.jobName, kind: dest.kind,
+    category: dest.category || null,
+    capturedAt: new Date().toISOString()
+  };
+  S.objUrls[item.localId] = p.scanUrl || p.url;
+  try{ if(p.origUrl) URL.revokeObjectURL(p.origUrl); }catch(e){}
+  IDB.put(item).catch(function(){});
+  S.queue.push(item);
+  renderAll();
+  toast("Filed to " + dest.jobName, function(){ removeQueued(item.localId); });
+  setTimeout(function(){ flush(); }, 400);
+}
+
+function removeQueued(localId){
+  S.queue = S.queue.filter(function(q){ return q.localId !== localId; });
+  IDB.del(localId).catch(function(){});
+  renderAll();
+}
+
+var flushing = false;
+function flush(){
+  if(flushing || !S.queue.length) return;
+  if(!S.assets || !S.db){ renderAll(); return; }
+  if(!navigator.onLine){ renderAll(); return; }
+  var item = null;
+  for(var qi=0; qi<S.queue.length; qi++){ if(!S.queue[qi].stuck){ item = S.queue[qi]; break; } }
+  if(!item){ renderAll(); return; }
+  flushing = true;
+  S.assets.upload(item.blob, {type:"image/jpeg"}).then(function(up){
+    /* upload the remaining pages too, in order, so the record keeps the whole
+       document and not just its first page */
+    var extra = [], chain = Promise.resolve();
+    (item.morePages || []).forEach(function(b){
+      chain = chain.then(function(){
+        return S.assets.upload(b, {type:"image/jpeg"})
+          .then(function(u){ extra.push(u.id); })
+          .catch(function(){});   /* a lost page must not lose the receipt */
+      });
+    });
+    return chain.then(function(){
+      return S.db.doc("receipts/"+item.localId).set({
+        jobId:item.jobId, jobName:item.jobName, kind:item.kind, category:item.category,
+        assetId:up.id, assetIds:[up.id].concat(extra),
+        pageCount:item.pageCount || 1, scanned:!!item.scanned,
+        docType:null, invoiceNo:null, jobCode:null, terms:null, dueDate:null,
+        capturedAt:item.capturedAt,
+        vendor:null, date:null, total:null, tax:null, receiptNo:null, note:"", method:"",
+        items:[], openNames:0, splits:null, division:null, openDivision:false,
+        status:"reading", reviewReason:null
+      });
+    }).then(function(){
+      return IDB.del(item.localId).then(function(){
+        S.queue = S.queue.filter(function(q){ return q.localId !== item.localId; });
+        runOcr(item.localId, item.blob, item);
+      });
+    });
+  }).then(function(){
+    flushing = false; renderAll();
+    if(S.queue.length) setTimeout(flush, 250);
+  }).catch(function(e){
+    flushing = false;
+    var code = e && e.code;
+    if(code === "quota_or_state" || code === "too_large"){
+      // don't spin on something that will never go through
+      item.stuck = (e.message || code || "Upload refused");
+    }
+    renderAll();
+  });
+}
+
+function rememberJob(id){
+  S.lastJobIds = [id].concat(S.lastJobIds.filter(function(x){ return x!==id; })).slice(0,3);
+  try{ localStorage.setItem("rr_last", JSON.stringify(S.lastJobIds)); }catch(e){}
+}
+
+/* ============================ job picker ============================ */
+function openPicker(){
+  $("pick-title").textContent = "Which job?";
+  var pv = $("pick-preview"); pv.innerHTML = "";
+  if(S.pending && S.pending.url){
+    var im = el("img"); im.src = S.pending.url; im.alt = "";
+    pv.appendChild(im);
+    pv.appendChild(el("div","t","Cleaning it up\u2026 tap a job, that's all you need to do."));
+  }
+  buildPickGrid();
+  $("sheet-pick").hidden = false;
+}
+function closePicker(keep){
+  $("sheet-pick").hidden = true;
+  if(!keep && S.pending){
+    try{
+      if(S.pending.url) URL.revokeObjectURL(S.pending.url);
+      if(S.pending.scanUrl) URL.revokeObjectURL(S.pending.scanUrl);
+      if(S.pending.origUrl) URL.revokeObjectURL(S.pending.origUrl);
+    }catch(e){}
+    S.pending = null;
+  }
+}
+function buildPickGrid(){
+  var g = $("pickgrid"); g.innerHTML = "";
+  var active = S.jobs.filter(function(j){ return j.kind === "job" && !j.archived; });
+  var recent = S.lastJobIds.map(function(id){
+    return active.filter(function(j){ return j.id===id; })[0];
+  }).filter(Boolean);
+
+  if(recent.length){
+    g.appendChild(el("div","seclabel","Last used"));
+    recent.forEach(function(j){ g.appendChild(jobButton(j,true)); });
+    g.appendChild(el("div","seclabel","All jobs"));
+  }
+  var rest = active.filter(function(j){ return S.lastJobIds.indexOf(j.id) < 0; });
+  if(!active.length){
+    g.appendChild(el("div","notice","No jobs yet. Create the first one below."));
+  }
+  rest.forEach(function(j){ g.appendChild(jobButton(j,false)); });
+
+  g.appendChild(el("div","seclabel","Not a job"));
+  var bw = el("button","pick");
+  var ba = el("span","ja","BW"); bw.appendChild(ba);
+  bw.appendChild(el("span",null,"BuildWrite expense"));
+  bw.appendChild(el("span","arrow","›"));
+  bw.onclick = showCategories;
+  g.appendChild(bw);
+
+  var nb = el("button","pick ghost","+  New job");
+  nb.onclick = function(){ $("sheet-newjob").hidden=false; $("nj-name").value=""; setTimeout(function(){ $("nj-name").focus(); },60); };
+  g.appendChild(nb);
+}
+function jobButton(j, isRecent){
+  var b = el("button","pick"+(isRecent?" recent":""));
+  b.appendChild(el("span","ja",initials(j.name)));
+  b.appendChild(el("span",null,j.name));
+  b.onclick = function(){ fileReceipt({jobId:j.id, jobName:j.name, kind:"job"}); };
+  return b;
+}
+/* 21 tracker categories need a screen of their own — a popup that cannot
+   scroll would bury two thirds of them. */
+function showCategories(){
+  $("sheet-pick").hidden = true;
+  var g = $("catsview"); g.innerHTML = "";
+  var note = el("p","notice flat"); note.style.margin = "0 0 12px";
+  note.textContent = "These are the categories from your Deductible Expense Tracker. Pick the closest one — you can split a receipt across several afterwards.";
+  g.appendChild(note);
+  var grid = el("div","pickgrid");
+  BW_CATS.forEach(function(c){
+    var b = el("button","pick");
+    b.appendChild(el("span","ja","BW"));
+    b.appendChild(el("span",null,c));
+    b.onclick = function(){
+      fileReceipt({jobId:"buildwrite", jobName:"BuildWrite", kind:"buildwrite", category:c});
+      show("scan");
+    };
+    grid.appendChild(b);
+  });
+  g.appendChild(grid);
+  show("cats");
+}
+
+/* ============================ rendering ============================ */
+function allRows(){
+  var qrows = S.queue.map(function(q){
+    return {
+      id:q.localId, queued:true, stuck:q.stuck,
+      jobId:q.jobId, jobName:q.jobName, kind:q.kind, category:q.category,
+      capturedAt:q.capturedAt, vendor:null, date:null, total:null, status:"waiting",
+      localUrl:S.objUrls[q.localId] || null
+    };
+  });
+  return qrows.concat(S.receipts);
+}
+function matchFilter(r){
+  if(S.filter === "all") return true;
+  if(S.filter === "buildwrite") return r.kind === "buildwrite";
+  return r.jobId === S.filter;
+}
+
+/* ---------------- filed state ----------------
+   A receipt that has been written into a workbook carries filedAt. It stays in
+   the app -- searchable, and still counted in Totals -- but drops out of the
+   working list so what's left is only what still needs doing. Filing only ever
+   picks up receipts without the stamp, which is what makes double-filing
+   impossible rather than merely unlikely. */
+function isFiled(r){ return !!(r && r.filedAt); }
+function matchFiled(r){
+  if(S.filed === "all") return true;
+  if(S.filed === "filed") return isFiled(r);
+  return !isFiled(r);                       /* "unfiled" — the default */
+}
+function filedCount(){ return allRows().filter(isFiled).length; }
+function unfiledCount(){ return allRows().filter(function(r){ return !isFiled(r); }).length; }
+
+/* ---------------- search ----------------
+   Every word has to land somewhere on the receipt — vendor, job, category,
+   note, number, date, amount, or any line item. Line items are the reason
+   this exists: "whiteout" is on a receipt that says Walmart. */
+function lower(s){ return String(s==null ? "" : s).toLowerCase(); }
+function receiptHits(r){
+  var q = (S.q || "").trim().toLowerCase();
+  if(!q) return { hit:true, items:[] };
+  var terms = q.split(/\s+/).filter(Boolean);
+  var itemText = (r.items||[]).map(function(it){
+    return lower([it.name, it.text, it.code].filter(Boolean).join(" "));
+  });
+  var hay = [
+    lower(r.vendor), lower(r.jobName), lower(r.category), lower(r.note), lower(r.receiptNo),
+    lower(r.date || (r.capturedAt||"").slice(0,10)),
+    r.total==null ? "" : Number(r.total).toFixed(2),
+    r.kind === "buildwrite" ? "buildwrite" : "job",
+    (r.splits||[]).map(function(s){ return lower(s.category); }).join(" "),
+    itemText.join(" ")
+  ].join(" ");
+  for(var i=0;i<terms.length;i++){ if(hay.indexOf(terms[i]) < 0) return { hit:false, items:[] }; }
+
+  var matched = [];
+  (r.items||[]).forEach(function(it, k){
+    for(var i=0;i<terms.length;i++){
+      if(itemText[k].indexOf(terms[i]) >= 0){ matched.push(it); return; }
+    }
+  });
+  return { hit:true, items:matched };
+}
+
+function renderAll(){ renderFiledTabs(); renderChips(); renderStats(); renderList(); renderReview(); renderTotals(); renderExport(); renderNet(); }
+
+function renderFiledTabs(){
+  var host = $("filedtabs"); if(!host) return;
+  host.innerHTML = "";
+  var nf = unfiledCount(), f = filedCount();
+  [["unfiled","To file" + (nf ? " ("+nf+")" : "")],
+   ["filed","Filed" + (f ? " ("+f+")" : "")],
+   ["all","Everything"]].forEach(function(d){
+    var b = el("button", null, d[1]);
+    b.setAttribute("aria-pressed", String(S.filed === d[0]));
+    b.onclick = function(){ S.filed = d[0]; renderAll(); };
+    host.appendChild(b);
+  });
+}
+
+function renderNet(){
+  var c = $("netchip"), n = S.queue.length;
+  if(!n){ c.hidden = true; return; }
+  c.hidden = false;
+  var stuck = S.queue.filter(function(q){ return q.stuck; }).length;
+  c.className = "chip " + (stuck ? "bad" : "live");
+  c.textContent = stuck ? (stuck + " stuck") : (n + (n===1?" waiting":" waiting"));
+}
+
+function renderStats(){
+  var rows = allRows();
+  var weekAgo = Date.now() - 7*864e5;
+  var wk = 0, rev = 0;
+  rows.forEach(function(r){
+    if(new Date(r.capturedAt).getTime() >= weekAgo && r.total) wk += r.total;
+    if(needsAttention(r)) rev++;
+  });
+  $("st-week").textContent = wk ? money(wk) : "$0";
+  $("st-count").textContent = String(rows.length);
+  $("st-review").textContent = String(rev);
+  var b = $("rbadge");
+  b.hidden = !rev; b.textContent = String(rev);
+}
+
+function renderChips(){
+  var f = $("filters"); f.innerHTML = "";
+  var defs = [{id:"all",name:"All"}];
+  S.jobs.filter(function(j){ return j.kind==="job" && !j.archived; })
+        .forEach(function(j){ defs.push({id:j.id,name:j.name}); });
+  defs.push({id:"buildwrite",name:"BuildWrite"});
+  defs.forEach(function(d){
+    var b = el("button","fchip",d.name);
+    b.setAttribute("aria-pressed", String(S.filter===d.id));
+    b.onclick = function(){ S.filter = d.id; renderChips(); renderList(); };
+    f.appendChild(b);
+  });
+}
+
+function renderList(){
+  var body = $("listbody"); body.innerHTML = "";
+  var q = (S.q||"").trim();
+  var hits = {};
+  var rows = allRows().filter(function(r){
+    if(!matchFilter(r)) return false;
+    if(!matchFiled(r)) return false;
+    var h = receiptHits(r);
+    hits[r.id] = h.items;
+    return h.hit;
+  });
+  rows.sort(function(a,b){ return (b.capturedAt||"") < (a.capturedAt||"") ? -1 : 1; });
+
+  var tot = 0, counted = 0;
+  rows.forEach(function(r){ if(r.total!=null){ tot += r.total; counted++; } });
+  var lbl = q ? ("Matching “" + q + "”")
+          : S.filter==="all" ? "All receipts"
+          : S.filter==="buildwrite" ? "BuildWrite"
+          : (S.jobs.filter(function(j){return j.id===S.filter;})[0]||{}).name || "Job";
+  $("sum-label").textContent = lbl;
+  $("sum-total").textContent = money(tot);
+  $("sum-count").textContent = String(rows.length) + (counted < rows.length ? " ("+(rows.length-counted)+" no total)" : "");
+
+  if(!rows.length){
+    var e = el("div","empty");
+    if(q){
+      e.appendChild(el("b",null,"Nothing matches that"));
+      e.appendChild(el("div",null,"Search looks at the vendor, the job, the note, the amount and every line item" +
+        (S.filed === "unfiled" ? " — and right now it's only looking at receipts still to file. Try Everything." : ".")));
+    } else if(S.filed === "unfiled" && filedCount()){
+      e.appendChild(el("b",null,"Nothing left to file"));
+      e.appendChild(el("div",null,"Every receipt here has been written into its spreadsheet. Tap Filed to see them, or Everything for the lot."));
+    } else if(S.filed === "filed"){
+      e.appendChild(el("b",null,"Nothing filed yet"));
+      e.appendChild(el("div",null,"Receipts show up here once they've been written into a spreadsheet."));
+    } else {
+      e.appendChild(el("b",null,"Nothing here yet"));
+      e.appendChild(el("div",null,"Scan a receipt and pick a job. It shows up here straight away, with the vendor and total filled in a moment later."));
+    }
+    body.appendChild(e);
+    return;
+  }
+  var wrap = el("div","rows");
+  rows.forEach(function(r){ wrap.appendChild(receiptRow(r, hits[r.id])); });
+  body.appendChild(wrap);
+}
+
+function receiptRow(r, matchedItems){
+  var b = el("button","row" + (isFiled(r) ? " done" : ""));
+  var src = r.localUrl || (r.assetId ? RR_blobUrl(r.assetId) : null);
+  if(src){
+    var im = el("img","thumb"); im.src = src; im.alt = ""; im.loading = "lazy";
+    b.appendChild(im);
+  } else {
+    b.appendChild(el("div","thumb ph","—"));
+  }
+  var m = el("div","rmain");
+  var top = el("div","rtop");
+  top.appendChild(el("div","vendor", r.vendor || (r.status==="reading" ? "Reading…" : r.status==="waiting" ? "Waiting to upload" : "No vendor")));
+  top.appendChild(el("div","amount", money(r.total)));
+  m.appendChild(top);
+
+  var sub = el("div","rsub");
+  sub.appendChild(el("span",null, shortDate(r.date || (r.capturedAt||"").slice(0,10))));
+  sub.appendChild(el("span","dot","·"));
+  sub.appendChild(el("span",null, r.kind==="buildwrite" ? ("BuildWrite · "+(r.category||"")) : (r.jobName||"")));
+  if(r.status==="review") sub.appendChild(el("span","tag review", r.dupOf ? "duplicate?" : "review"));
+  if(r.status==="waiting") sub.appendChild(el("span","tag "+(r.stuck?"dup":"wait"), r.stuck ? "stuck" : "queued"));
+  if(r.status==="reading") sub.appendChild(el("span","tag reading","reading"));
+  if(r.openDivision) sub.appendChild(el("span","tag review","no division"));
+  else if(r.division) sub.appendChild(el("span","tag split", r.division.length > 22 ? (r.division.slice(0,21) + "…") : r.division));
+  if(r.docType === "invoice") sub.appendChild(el("span","tag inv",
+    r.invoiceNo ? ("invoice " + r.invoiceNo) : "invoice"));
+  if(isFiled(r)) sub.appendChild(el("span","tag filed","filed " + shortDate(String(r.filedAt).slice(0,10))));
+  if(r.openNames) sub.appendChild(el("span","tag name", r.openNames + " to name"));
+  if(r.splits && r.splits.length) sub.appendChild(el("span","tag split", r.splits.length + "-way split"));
+  m.appendChild(sub);
+
+  if(matchedItems && matchedItems.length){
+    m.appendChild(el("div","hitline", matchedItems.map(function(it){
+      return itemLabel(it) + (it.price==null ? "" : "  " + money(it.price));
+    }).join("   ·   ")));
+  }
+  b.appendChild(m);
+  b.onclick = function(){ openDetail(r); };
+  return b;
+}
+
+function needsAttention(r){
+  /* once a receipt is in a spreadsheet it is no longer something to act on;
+     correcting it means editing the sheet too, not just the app */
+  if(isFiled(r)) return false;
+  return r.status === "review" || !!r.openNames || !!r.openDivision || wantsSplit(r);
+}
+
+/* A job invoice with several priced lines almost certainly spans budget
+   lines -- the first real one did -- and filed whole it charges the entire
+   amount to a single division. Worth raising before it is filed, not after. */
+function wantsSplit(r){
+  if(r.docType !== "invoice" || r.kind !== "job") return false;
+  if(r.splits && r.splits.length) return false;
+  if(r.splitChecked) return false;
+  var priced = (r.items || []).filter(function(it){ return it.price != null; });
+  return priced.length > 1;
+}
+function renderReview(){
+  var body = $("reviewbody"); body.innerHTML = "";
+  var rows = allRows().filter(needsAttention);
+  if(!rows.length){
+    var e = el("div","empty");
+    e.appendChild(el("b",null,"Nothing to fix"));
+    e.appendChild(el("div",null,"Every receipt that's been read came back clean, and every line on them has a name."));
+    body.appendChild(e);
+    return;
+  }
+  var wrap = el("div","rows");
+  rows.forEach(function(r){
+    var b = receiptRow(r);
+    var m = b.querySelector(".rmain");
+    var why = r.reviewReason;
+    if(!why && wantsSplit(r)){
+      var np = (r.items || []).filter(function(it){ return it.price != null; }).length;
+      why = np + " lines on this invoice — check whether they belong on different budget lines";
+    }
+    if(!why && r.openDivision){
+      why = "No division yet — it won't count against any estimate line";
+    }
+    if(!why && r.openNames){
+      why = r.openNames === 1
+        ? "One line won't make sense later — name it while you remember"
+        : r.openNames + " lines won't make sense later — name them while you remember";
+    }
+    if(why){
+      var w = el("div","rsub");
+      w.appendChild(el("span",null,why));
+      m.appendChild(w);
+    }
+    wrap.appendChild(b);
+  });
+  body.appendChild(wrap);
+}
+
+/* ============================ totals ============================
+   The two pathways, side by side: what each job has cost, and what BuildWrite
+   has spent by category. Its real job is to make ABSENCE visible — you can't
+   search for a receipt you never scanned, but an empty job or a category that
+   went quiet shows up here on its own. */
+
+function rowTime(r){
+  var d = r.date || (r.capturedAt||"").slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return new Date(r.capturedAt||0).getTime() || 0;
+  var p = d.split("-");
+  return new Date(Number(p[0]), Number(p[1])-1, Number(p[2]), 12).getTime();
+}
+function spanFrom(){
+  var n = new Date();
+  if(S.span === "month") return new Date(n.getFullYear(), n.getMonth(), 1).getTime();
+  if(S.span === "year")  return new Date(n.getFullYear(), 0, 1).getTime();
+  return 0;
+}
+function spanWord(){ return S.span === "month" ? "this month" : S.span === "year" ? "this year" : "all time"; }
+var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function monthLabel(t){
+  if(!t) return "never";
+  var d = new Date(t);
+  return MON[d.getMonth()] + " " + String(d.getFullYear()).slice(2);
+}
+function daysSince(t){ return Math.floor((Date.now() - t) / 864e5); }
+
+function personalShare(r){
+  if(r.splits && r.splits.length){
+    var p = 0;
+    r.splits.forEach(function(s){ if(s.category === PERSONAL) p += s.amount; });
+    return p;
+  }
+  return r.category === PERSONAL ? (r.total||0) : 0;
+}
+function categoryTotals(rows){
+  var by = {};
+  rows.forEach(function(r){
+    if(r.kind !== "buildwrite") return;
+    if(r.splits && r.splits.length){
+      r.splits.forEach(function(s){ by[s.category] = (by[s.category]||0) + s.amount; });
+    } else if(r.category){
+      by[r.category] = (by[r.category]||0) + (r.total||0);
+    }
+  });
+  return by;
+}
+
+function totalsCard(name, amount, sub, flag){
+  var c = el("div","tcard");
+  var top = el("div","top");
+  top.appendChild(el("div","tn", name));
+  top.appendChild(el("div","tv", amount));
+  c.appendChild(top);
+  if(sub) c.appendChild(el("div","sub" + (flag ? " flag" : ""), sub));
+  return c;
+}
+
+function renderTotals(){
+  var body = $("totalsbody"); if(!body) return;
+  body.innerHTML = "";
+
+  var chips = el("div","span");
+  [["month","This month"],["year","This year"],["all","All time"]].forEach(function(d){
+    var b = el("button", null, d[1]);
+    b.setAttribute("aria-pressed", String(S.span === d[0]));
+    b.onclick = function(){ S.span = d[0]; renderTotals(); };
+    chips.appendChild(b);
+  });
+  body.appendChild(chips);
+
+  var all = allRows();
+  var from = spanFrom();
+  var rows = all.filter(function(r){ return rowTime(r) >= from; });
+  var gaps = [];
+
+  var spent = 0, personal = 0, noTotal = 0, waiting = 0, toName = 0;
+  rows.forEach(function(r){
+    spent += (r.total || 0);
+    personal += personalShare(r);
+    if(r.status === "waiting") waiting++;
+    else if(r.total == null && r.status !== "reading") noTotal++;
+    toName += (r.openNames || 0);
+  });
+
+  var gapHost = el("div");
+  body.appendChild(gapHost);
+
+  var sum = el("div","sumline");
+  var lft = el("div");
+  lft.appendChild(el("div","l","Spent " + spanWord()));
+  lft.appendChild(el("div","n", money(spent - personal)));
+  sum.appendChild(lft);
+  var rgt = el("div"); rgt.style.textAlign = "right";
+  rgt.appendChild(el("div","l","Receipts"));
+  rgt.appendChild(el("div","n", String(rows.length)));
+  sum.appendChild(rgt);
+  body.appendChild(sum);
+  if(personal > 0){
+    var pl = el("div","rsub"); pl.style.margin = "-6px 0 14px";
+    pl.appendChild(el("span",null,"Not counting " + money(personal) + " marked as not a business expense."));
+    body.appendChild(pl);
+  }
+
+  /* ---- jobs: materials and proof ---- */
+  var active = S.jobs.filter(function(j){ return j.kind === "job" && !j.archived; });
+  var lastJob = {}, totJob = {}, cntJob = {};
+  all.forEach(function(r){
+    if(r.kind === "buildwrite") return;
+    var t = rowTime(r);
+    if(!lastJob[r.jobId] || t > lastJob[r.jobId]) lastJob[r.jobId] = t;
+  });
+  rows.forEach(function(r){
+    if(r.kind === "buildwrite") return;
+    totJob[r.jobId] = (totJob[r.jobId] || 0) + (r.total || 0);
+    cntJob[r.jobId] = (cntJob[r.jobId] || 0) + 1;
+  });
+
+  body.appendChild(el("div","grouphead")).appendChild(el("h2",null,"Jobs"));
+  if(!active.length){
+    body.appendChild(el("div","empty")).appendChild(el("b",null,"No jobs yet"));
+  } else {
+    var jw = el("div","rows");
+    active.forEach(function(j){
+      var n = cntJob[j.id] || 0, last = lastJob[j.id] || 0;
+      var sub, flag = false;
+      if(!n && !last){ sub = "nothing ever filed to this job"; flag = true; gaps.push("Nothing has ever been filed to " + j.name); }
+      else if(!n){ sub = "nothing " + spanWord() + " · last was " + monthLabel(last); flag = true; gaps.push("No receipts on " + j.name + " " + spanWord()); }
+      else {
+        var d = daysSince(last);
+        sub = n + (n===1 ? " receipt" : " receipts") + " · last " + (d <= 0 ? "today" : d === 1 ? "yesterday" : d + " days ago");
+        if(d >= 14){ flag = true; gaps.push("Nothing on " + j.name + " in " + d + " days"); }
+      }
+      var card = totalsCard(j.name, money(totJob[j.id] || 0), sub, flag);
+
+      /* with an estimate imported, say how the job is tracking against it */
+      var drows = divisionsFor(j.id);
+      if(drows){
+        var estTotal = 0, byDiv = {}, nodiv = 0;
+        drows.forEach(function(x){ estTotal += (x.e || 0); });
+        all.forEach(function(r){
+          if(r.jobId !== j.id || r.kind === "buildwrite") return;
+          if(r.division) byDiv[r.division] = (byDiv[r.division] || 0) + (r.total || 0);
+          else if(!r.queued) nodiv++;
+        });
+        var over = Object.keys(byDiv).filter(function(d){
+          var e = divisionEst(j.id, d);
+          return e != null && e > 0 && byDiv[d] > e;
+        });
+        var line = el("div","sub");
+        line.textContent = money(totJob[j.id] || 0) + " logged against " + money(estTotal) +
+          " estimated · " + Object.keys(byDiv).length + " of " + drows.length + " divisions touched";
+        card.appendChild(line);
+        if(over.length){
+          var ol = el("div","sub flag");
+          ol.textContent = (over.length === 1 ? "Over estimate: " : over.length + " divisions over estimate: ") + over.join(", ");
+          card.appendChild(ol);
+          gaps.push(over.length + " division" + (over.length>1?"s":"") + " over estimate on " + j.name);
+        }
+        if(nodiv){
+          var nl = el("div","sub flag");
+          nl.textContent = nodiv + (nodiv === 1 ? " receipt has no division — it counts against nothing" : " receipts have no division — they count against nothing");
+          card.appendChild(nl);
+          gaps.push(nodiv + " receipt" + (nodiv>1?"s":"") + " on " + j.name + " with no division");
+        }
+      }
+
+      card.style.cursor = "pointer";
+      card.onclick = function(){ S.filter = j.id; S.q = ""; $("q").value = ""; renderAll(); show("list"); };
+      jw.appendChild(card);
+    });
+    body.appendChild(jw);
+  }
+
+  /* ---- BuildWrite: the tax pathway ---- */
+  var now = categoryTotals(rows), ever = categoryTotals(all);
+  var lastCat = {};
+  all.forEach(function(r){
+    if(r.kind !== "buildwrite") return;
+    var t = rowTime(r);
+    var cats = (r.splits && r.splits.length) ? r.splits.map(function(s){ return s.category; }) : (r.category ? [r.category] : []);
+    cats.forEach(function(c){ if(!lastCat[c] || t > lastCat[c]) lastCat[c] = t; });
+  });
+
+  body.appendChild(el("div","grouphead")).appendChild(el("h2",null,"BuildWrite by category"));
+  var shown = SPLIT_CATS.filter(function(c){ return (now[c] || 0) !== 0 || (ever[c] || 0) !== 0; });
+  if(!shown.length){
+    var e2 = el("div","empty");
+    e2.appendChild(el("b",null,"Nothing filed to BuildWrite yet"));
+    e2.appendChild(el("div",null,"Scan a receipt and send it to BuildWrite instead of a job — that's the tax side."));
+    body.appendChild(e2);
+  } else {
+    var cw = el("div","rows");
+    shown.forEach(function(c){
+      var amt = now[c] || 0, sub = null, flag = false;
+      if(!amt && ever[c]){
+        sub = "nothing " + spanWord() + " · last was " + monthLabel(lastCat[c]);
+        flag = S.span !== "all";
+        if(flag) gaps.push("No " + c.toLowerCase() + " " + spanWord() + " (last " + monthLabel(lastCat[c]) + ")");
+      }
+      var card = totalsCard(c, money(amt), sub, flag);
+      card.style.cursor = "pointer";
+      card.onclick = function(){ S.filter = "buildwrite"; S.q = c; $("q").value = c; renderAll(); show("list"); };
+      cw.appendChild(card);
+    });
+    body.appendChild(cw);
+  }
+
+  /* ---- what's missing ---- */
+  if(waiting) gaps.unshift(waiting + (waiting===1 ? " receipt hasn't uploaded yet" : " receipts haven't uploaded yet"));
+  if(noTotal) gaps.unshift(noTotal + (noTotal===1 ? " receipt has no total on it" : " receipts have no total on them"));
+  if(toName) gaps.unshift(toName + (toName===1 ? " line item still needs a name" : " line items still need names"));
+
+  if(gaps.length){
+    var g = el("div","gaps");
+    g.appendChild(el("h3",null,"Worth a look"));
+    var ul = el("ul");
+    gaps.slice(0,7).forEach(function(t){ ul.appendChild(el("li",null,t)); });
+    if(gaps.length > 7) ul.appendChild(el("li",null,"…and " + (gaps.length-7) + " more"));
+    g.appendChild(ul);
+    gapHost.appendChild(g);
+  }
+  var gb = $("gbadge");
+  if(gb){ gb.hidden = !gaps.length; gb.textContent = String(gaps.length); }
+}
+
+/* ============================ items: naming + split ============================ */
+
+/* Read line items off a receipt that was filed before items were captured. */
+function readItemsNow(r, btn){
+  if(!S.sample || !S.canImages) return;
+  var label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Reading…";
+  imageBlob(r).then(function(blob){
+    if(!blob) throw new Error("no image");
+    return S.sample.json(ITEMS_ONLY_PROMPT, { images:[blob], modelTier:"default" });
+  }).then(function(res){
+    var items = cleanItems(res && res.items);
+    applyAliases(items);
+    if(!items.length){ btn.disabled=false; btn.textContent=label; toast("Couldn't make out the item lines"); return; }
+    return S.db.doc("receipts/"+r.id).update({ items:items, openNames: openNameCount(items) }).then(function(){
+      toast("Read " + items.length + (items.length===1?" line":" lines"));
+    });
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = label;
+    toast(e && e.code === "rate_limited" ? "Reader was busy — try again in a minute" : "Couldn't read the lines off this one");
+  });
+}
+
+/* The line-item block inside the receipt detail sheet. */
+function renderItemsSection(r, body){
+  var items = (r.items || []).map(function(it){ return Object.assign({}, it); });
+  var inputs = [];
+  var wrap = el("div");
+  wrap.style.marginTop = "4px";
+  body.appendChild(wrap);
+
+  var api = {
+    collect: function(){
+      inputs.forEach(function(p){ p.it.name = p.inp.value.trim() || null; });
+      return items;
+    },
+    /* names the user typed become permanent, keyed to the barcode */
+    learn: function(){
+      inputs.forEach(function(p){
+        var v = p.inp.value.trim();
+        if(v && v !== p.was) saveAlias(p.it, v);
+      });
+    },
+    redraw: function(){ draw(); }
+  };
+
+  function draw(){
+    wrap.innerHTML = "";
+    inputs = [];
+    if(r.queued) return;
+
+    var open = openNameCount(items);
+    wrap.appendChild(el("div","seclabel", items.length ? ("Line items" + (open ? " — " + open + " to name" : "")) : "Line items"));
+
+    if(!items.length){
+      var n = el("p","notice flat"); n.style.margin = "0 0 10px";
+      n.textContent = "No line items on this one. Every new scan captures them; a receipt filed before that can be read again off its image.";
+      wrap.appendChild(n);
+      if(S.sample && S.canImages && S.db){
+        var rb = el("button","btn sec","Read the line items");
+        rb.onclick = function(){ readItemsNow(r, rb); };
+        wrap.appendChild(rb);
+      }
+      return;
+    }
+
+    if(open){
+      var tip = el("p","notice"); tip.style.margin = "0 0 10px";
+      tip.textContent = open === 1
+        ? "One line won't mean anything in six months. Name it now, while you remember — it's saved against the barcode, so you never name it twice."
+        : open + " lines won't mean anything in six months. Name them now, while you remember — each one is saved against its barcode, so you only do this once.";
+      wrap.appendChild(tip);
+    }
+
+    var list = el("div","items");
+    items.forEach(function(it){
+      var needs = !it.name && !it.clear;
+      var row = el("div","item" + (needs ? " open" : ""));
+      var line = el("div","iline");
+      line.appendChild(el("div","iprint", it.text + (it.code ? ("   #" + it.code) : "")));
+      line.appendChild(el("div","iprice", it.price == null ? "—" : money(it.price)));
+      row.appendChild(line);
+
+      var inp = el("input","inp sm");
+      inp.type = "text";
+      inp.setAttribute("enterkeyhint","done");
+      inp.placeholder = needs ? "What was it?" : it.text;
+      inp.value = it.name || "";
+      row.appendChild(inp);
+      inputs.push({ it:it, inp:inp, was: it.name || "" });
+
+      if(needs && it.guess){
+        var g = el("button","guess","Might be: " + it.guess + " — tap to use it");
+        g.onclick = function(){ inp.value = it.guess; inp.focus(); };
+        row.appendChild(g);
+      }
+      list.appendChild(row);
+    });
+    wrap.appendChild(list);
+
+    var sum = itemsSum(items);
+    if(sum != null){
+      var line2 = el("div","rsub"); line2.style.marginTop = "7px";
+      var txt = "Lines add to " + money(sum);
+      if(r.total != null){
+        var gap = Math.round((r.total - sum) * 100) / 100;
+        txt += " · receipt " + money(r.total);
+        if(Math.abs(gap) >= 0.01) txt += " · " + money(gap) + " is tax and anything not read";
+      }
+      line2.appendChild(el("span",null,txt));
+      wrap.appendChild(line2);
+    }
+
+    if(r.kind === "buildwrite" && S.db){
+      var sb = el("button","btn sec", (r.splits && r.splits.length) ? "Edit the category split" : "Split by category");
+      sb.style.marginTop = "10px";
+      sb.onclick = function(){ api.collect(); openSplit(r, items); };
+      wrap.appendChild(sb);
+    }
+
+    /* A job receipt or invoice can span budget lines too. */
+    if(r.kind === "job" && S.db && divisionsFor(r.jobId)){
+      var db2 = el("button","btn sec",
+        (r.splits && r.splits.length) ? "Edit the division split" : "Split across divisions");
+      db2.style.marginTop = "10px";
+      db2.onclick = function(){ api.collect(); openSplit(r, items); };
+      wrap.appendChild(db2);
+
+      if(wantsSplit(r)){
+        var one = el("button","btn sec","It's all one division");
+        one.style.marginTop = "8px";
+        one.onclick = function(){
+          one.disabled = true;
+          S.db.doc("receipts/"+r.id).update({ splitChecked:true }).then(function(){
+            toast("Left on one division");
+          }).catch(function(){ one.disabled = false; });
+        };
+        wrap.appendChild(one);
+      }
+    }
+
+    if(r.splits && r.splits.length){
+      var sw = el("div"); sw.style.marginTop = "12px";
+      sw.appendChild(el("div","seclabel","Filed as"));
+      r.splits.forEach(function(s){
+        var c = el("div","catline");
+        c.appendChild(el("span","c", s.category));
+        c.appendChild(el("span","a", money(s.amount)));
+        sw.appendChild(c);
+      });
+      wrap.appendChild(sw);
+    }
+  }
+
+  draw();
+  return api;
+}
+
+/* Spread the receipt across categories by what each line cost. Tax and
+   anything else between the lines and the total ride along pro-rata, and the
+   cents are forced to land exactly on the receipt total. */
+function allocate(items, total){
+  var base = 0, by = {};
+  items.forEach(function(it){
+    if(it.price == null || !it.cat) return;
+    base += it.price;
+    by[it.cat] = (by[it.cat] || 0) + it.price;
+  });
+  var cats = Object.keys(by);
+  if(!cats.length || Math.abs(base) < 0.005) return [];
+  var target = (total != null && total > 0) ? total : base;
+  var out = cats.map(function(c){
+    return { category:c, lines:by[c], amount: Math.round(target * (by[c] / base) * 100) / 100 };
+  });
+  out.sort(function(a,b){ return b.amount - a.amount; });
+  var sum = out.reduce(function(a,s){ return a + s.amount; }, 0);
+  var diff = Math.round((target - sum) * 100) / 100;
+  if(Math.abs(diff) >= 0.005) out[0].amount = Math.round((out[0].amount + diff) * 100) / 100;
+  return out;
+}
+
+/* Rendered as a full view rather than a bottom sheet: a sheet's inner scroller
+   does not scroll reliably on iOS, and <main> already does. */
+function openSplit(r, items){
+  var body = $("splitview"); body.innerHTML = "";
+  $("sv-title").textContent = (r.vendor || "Receipt") + " · " + money(r.total);
+  show("split");
+  var priced = items.filter(function(it){ return it.price != null; });
+
+  if(!priced.length){
+    var n = el("div","notice");
+    n.textContent = "No line prices were read off this receipt, so there's nothing to divide. Read the lines first, or leave it filed under the one category.";
+    body.appendChild(n);
+    return;
+  }
+
+  /* A job's lines divide by DIVISION, a BuildWrite one by category. One
+     lumber invoice routinely spans two budget lines -- the Builders
+     FirstSource invoice put Sakrete under Thickened Pads Material and anchor
+     bolts under Galvanized J-Bolt -- so a job receipt needs this just as much
+     as a Walmart run does. */
+  var byDivision = r.kind === "job";
+  var drows = byDivision ? divisionsFor(r.jobId) : null;
+  if(byDivision && !drows){
+    var nd = el("div","notice");
+    nd.textContent = "This job has no estimate imported yet, so there are no divisions to split across.";
+    body.appendChild(nd);
+    return;
+  }
+  var NO_DIV = "— no division —";
+  var options = byDivision
+    ? [NO_DIV].concat(drows.rows.map(function(x){ return x.d; }))
+    : SPLIT_CATS;
+  var fallback = byDivision ? (r.division || NO_DIV) : (r.category || BW_CATS[0]);
+
+  var intro = el("p","notice flat"); intro.style.margin = "0";
+  intro.textContent = byDivision
+    ? "Put each line on its budget line. Tax is spread across them in proportion, so the pieces still add up to the invoice total."
+    : "Put each line where it belongs. Tax is spread across the categories in proportion, so the pieces still add up to what you paid.";
+  body.appendChild(intro);
+
+  var sels = [];
+  var list = el("div","items compact");
+  priced.forEach(function(it){
+    var row = el("div","item");
+    var line = el("div","iline");
+    line.appendChild(el("div","iprint", itemLabel(it)));
+    line.appendChild(el("div","iprice", money(it.price)));
+    row.appendChild(line);
+    var sel = el("select","isel");
+    var want = it.cat || fallback;
+    options.forEach(function(c){
+      var o = el("option", null, c); o.value = c;
+      if(want === c) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.onchange = recalc;
+    row.appendChild(sel);
+    list.appendChild(row);
+    sels.push({ it:it, sel:sel });
+  });
+  body.appendChild(list);
+
+  var totals = el("div"); totals.style.marginTop = "14px";
+  body.appendChild(totals);
+
+  if(r.splits && r.splits.length){
+    var rm = el("button","btn dngr","Remove the split");
+    rm.style.marginTop = "12px";
+    rm.onclick = function(){
+      S.db.doc("receipts/"+r.id).update({ splits:null }).then(function(){
+        show("list"); toast("Split removed");
+      }).catch(function(){ toast("Couldn't remove that"); });
+    };
+    body.appendChild(rm);
+  }
+
+  var foot = el("div","savebar");
+  var save = el("button","btn","Save this split");
+  foot.appendChild(save);
+  body.appendChild(foot);
+
+  function current(){
+    sels.forEach(function(p){ p.it.cat = p.sel.value; });
+    return allocate(priced, r.total);
+  }
+  function recalc(){
+    var out = current();
+    totals.innerHTML = "";
+    totals.appendChild(el("div","seclabel","Where the money lands"));
+    var biz = 0, hasPersonal = false;
+    out.forEach(function(s){
+      var c = el("div","catline");
+      c.appendChild(el("span","c", s.category));
+      c.appendChild(el("span","a", money(s.amount)));
+      totals.appendChild(c);
+      if(s.category === PERSONAL) hasPersonal = true; else biz += s.amount;
+    });
+    if(hasPersonal){
+      var b = el("div","catline");
+      b.appendChild(el("span","c","Business share"));
+      b.appendChild(el("span","a", money(Math.round(biz * 100) / 100)));
+      totals.appendChild(b);
+    }
+    var t = el("div","catline tot");
+    t.appendChild(el("span","c","Receipt total"));
+    t.appendChild(el("span","a", money(r.total != null ? r.total : itemsSum(priced))));
+    totals.appendChild(t);
+  }
+  recalc();
+
+  save.onclick = function(){
+    var out = current();
+    if(!out.length){ toast("Nothing to split"); return; }
+    var primary = out.filter(function(s){
+      return s.category !== PERSONAL && s.category !== NO_DIV;
+    })[0] || out[0];
+    save.disabled = true;
+    var patch = {
+      items: items,
+      splits: out.map(function(s){ return { category:s.category, amount:s.amount }; }),
+      splitBy: byDivision ? "division" : "category",
+      openNames: openNameCount(items)
+    };
+    if(byDivision){
+      patch.division = primary.category === NO_DIV ? null : primary.category;
+      patch.openDivision = primary.category === NO_DIV;
+    } else {
+      patch.category = primary.category;
+    }
+    S.db.doc("receipts/"+r.id).update(patch).then(function(){
+      save.disabled = false;
+      show("list");
+      toast("Split across " + out.length + (byDivision ? " divisions" : " categories"));
+    }).catch(function(){
+      save.disabled = false;
+      toast("Couldn't save the split");
+    });
+  };
+}
+
+/* ============================ detail ============================ */
+function openDetail(r){
+  var body = $("detailview"); body.innerHTML = "";
+  $("dv-title").textContent = (r.vendor || "Receipt") + (r.total==null ? "" : (" \u00b7 " + money(r.total)));
+  show("detail");
+
+  if(r.queued){
+    var n = el("div","notice", r.stuck ? ("This one couldn't upload: " + r.stuck) : "Waiting for a connection. It uploads on its own — nothing to do.");
+    body.appendChild(n);
+  }
+  if(isFiled(r)){
+    var fn = el("div","notice");
+    fn.textContent = "Filed into " + (r.filedTo || "its spreadsheet") + " on " +
+      shortDate(String(r.filedAt).slice(0,10)) + ". Changing anything here won't change the row that's already in Excel — fix it there too, or tell me to re-file it.";
+    body.appendChild(fn);
+  }
+  /* every page, not just the first -- a two-page invoice whose total is on
+     page two is unverifiable from page one alone */
+  var ids = (r.assetIds && r.assetIds.length) ? r.assetIds : (r.assetId ? [r.assetId] : []);
+  if(r.localUrl && !ids.length){
+    var im0 = el("img","shot"); im0.src = r.localUrl; im0.alt = "Receipt photo";
+    body.appendChild(im0);
+  } else {
+    ids.forEach(function(aid, i){
+      if(ids.length > 1){
+        body.appendChild(el("div","pagelbl", "Page " + (i+1) + " of " + ids.length));
+      }
+      var im = el("img","shot");
+      im.src = (i === 0 && r.localUrl) ? r.localUrl : RR_blobUrl(aid);
+      im.alt = ids.length > 1 ? ("Page " + (i+1)) : "Receipt photo";
+      body.appendChild(im);
+    });
+  }
+  if(r.pageCount && ids.length && r.pageCount > ids.length){
+    var warn = el("p","notice");
+    warn.textContent = "The original had " + r.pageCount + " pages and " + ids.length +
+      " came through. Check the total against the paper copy before this is filed.";
+    body.appendChild(warn);
+  }
+
+  if(r.docType === "invoice"){
+    var inv = el("div","invbox");
+    [["Invoice no.", r.invoiceNo], ["Job code", r.jobCode],
+     ["Terms", r.terms], ["Due", r.dueDate ? shortDate(r.dueDate) : null]]
+      .forEach(function(p){
+        if(!p[1]) return;
+        var line = el("div","invrow");
+        line.appendChild(el("span","k", p[0]));
+        line.appendChild(el("span","v", String(p[1])));
+        inv.appendChild(line);
+      });
+    if(inv.childNodes.length) body.appendChild(inv);
+
+    /* Teach it the job code once and later invoices from this yard route
+       themselves. Nothing is learned without this tap. */
+    if(r.jobCode && r.jobId && r.kind === "job" && !jobForCode(r.jobCode)){
+      var learn = el("button","mini-btn",
+        "Remember " + r.jobCode + " = " + (r.jobName || "this job"));
+      learn.onclick = function(){
+        learn.disabled = true;
+        saveJobCode(r.jobCode, r.jobId).then(function(){
+          toast("Learned " + r.jobCode);
+          renderAll();
+        });
+      };
+      var lw = el("div"); lw.style.margin = "8px 0 2px";
+      lw.appendChild(learn);
+      body.appendChild(lw);
+    }
+    if(r.jobCodeMismatch){
+      var mm = el("p","notice");
+      mm.textContent = "This job code usually means " + r.jobCodeMismatch +
+        ", but it is filed to " + (r.jobName || "another job") + ". Worth a look.";
+      body.appendChild(mm);
+    }
+  }
+
+  if(r.queued){
+    var del = el("button","btn dngr","Discard this one");
+    del.onclick = function(){ removeQueued(r.id); show("list"); };
+    body.appendChild(del);
+    return;
+  }
+
+  var f = {};
+  function field(key,label,ph,type){
+    var l = el("label","fld");
+    l.appendChild(el("span","cap",label));
+    var i = el("input","inp");
+    i.type = type || "text"; i.placeholder = ph || "";
+    i.value = r[key]==null ? "" : r[key];
+    i.id = "d-"+key;
+    l.appendChild(i); f[key]=i; body.appendChild(l);
+    return i;
+  }
+  field("vendor","Vendor","Vendor name");
+  var two = el("div","two"); body.appendChild(two);
+  (function(){
+    var l1 = el("label","fld"); l1.appendChild(el("span","cap","Date"));
+    var i1 = el("input","inp"); i1.type="date"; i1.id="d-date"; i1.value = r.date || (r.capturedAt||"").slice(0,10);
+    l1.appendChild(i1); f.date=i1; two.appendChild(l1);
+    var l2 = el("label","fld"); l2.appendChild(el("span","cap","Total"));
+    var i2 = el("input","inp"); i2.type="text"; i2.inputMode="decimal"; i2.id="d-total"; i2.placeholder="0.00";
+    i2.value = r.total==null ? "" : Number(r.total).toFixed(2);
+    l2.appendChild(i2); f.total=i2; two.appendChild(l2);
+  })();
+  var two2 = el("div","two"); body.appendChild(two2);
+  (function(){
+    var l1 = el("label","fld"); l1.appendChild(el("span","cap","Tax"));
+    var i1 = el("input","inp"); i1.type="text"; i1.inputMode="decimal"; i1.id="d-tax";
+    i1.value = r.tax==null ? "" : Number(r.tax).toFixed(2);
+    l1.appendChild(i1); f.tax=i1; two2.appendChild(l1);
+    var l2 = el("label","fld"); l2.appendChild(el("span","cap","Receipt #"));
+    var i2 = el("input","inp"); i2.id="d-receiptNo"; i2.value = r.receiptNo || "";
+    l2.appendChild(i2); f.receiptNo=i2; two2.appendChild(l2);
+  })();
+  /* Payment method is a fixed list in the tracker, so it's a picker here. */
+  var lm = el("label","fld"); lm.appendChild(el("span","cap","Paid with"));
+  var im = el("select","inp"); im.id = "d-method";
+  var blankM = el("option", null, "— not set —"); blankM.value = ""; im.appendChild(blankM);
+  PAY_METHODS.forEach(function(m){
+    var o = el("option", null, m); o.value = m;
+    if(r.method === m) o.selected = true;
+    im.appendChild(o);
+  });
+  lm.appendChild(im); f.method = im; body.appendChild(lm);
+  var rememberCard = null;
+  if(r.ocr && r.ocr.cardLast4){
+    var c4 = r.ocr.cardLast4;
+    var cardHint = el("div","rsub"); cardHint.style.marginTop = "-4px";
+    var mapped = methodForCard(c4);
+    cardHint.appendChild(el("span",null, mapped
+      ? ("Card ending " + c4 + " is " + mapped + " — filled in for you.")
+      : ("The receipt shows a card ending " + c4 + ".")));
+    body.appendChild(cardHint);
+    if(!mapped){
+      var rc = el("label","fld"); rc.style.marginTop = "2px";
+      var cb = el("input"); cb.type = "checkbox"; cb.style.marginRight = "8px";
+      var lab = el("span",null,"Remember that card " + c4 + " is whatever I pick above");
+      lab.style.fontSize = "13px"; lab.style.color = "var(--muted)";
+      var wrap2 = el("div"); wrap2.style.display = "flex"; wrap2.style.alignItems = "center";
+      wrap2.appendChild(cb); wrap2.appendChild(lab);
+      rc.appendChild(wrap2); body.appendChild(rc);
+      rememberCard = { box:cb, last4:c4 };
+    }
+  }
+  var ln = el("label","fld"); ln.appendChild(el("span","cap","Note"));
+  var ta = el("textarea","inp"); ta.id="d-note"; ta.placeholder="Add a note (optional)"; ta.value = r.note || "";
+  ln.appendChild(ta); body.appendChild(ln);
+
+  var ls = el("label","fld"); ls.appendChild(el("span","cap","Filed to"));
+  var sel = el("select","inp"); sel.id="d-job";
+  S.jobs.filter(function(j){ return j.kind==="job" && !j.archived; }).forEach(function(j){
+    var o = el("option",null,j.name); o.value = j.id; if(j.id===r.jobId) o.selected = true; sel.appendChild(o);
+  });
+  BW_CATS.forEach(function(c){
+    var o = el("option",null,"BuildWrite — "+c); o.value = "bw::"+c;
+    if(r.kind==="buildwrite" && r.category===c) o.selected = true;
+    sel.appendChild(o);
+  });
+  ls.appendChild(sel); body.appendChild(ls);
+
+  /* Income stream and pre-formation flag — both are columns the tracker's
+     Expense Log expects on every row. */
+  var streamSel = null, preSel = null;
+  if(r.kind === "buildwrite"){
+    var two3 = el("div","two"); body.appendChild(two3);
+    var li = el("label","fld"); li.appendChild(el("span","cap","Income stream"));
+    streamSel = el("select","inp");
+    INCOME_STREAMS.forEach(function(s){
+      var o = el("option", null, s); o.value = s;
+      if((r.stream || INCOME_STREAMS[0]) === s) o.selected = true;
+      streamSel.appendChild(o);
+    });
+    li.appendChild(streamSel); two3.appendChild(li);
+
+    var lp = el("label","fld"); lp.appendChild(el("span","cap","Pre-formation?"));
+    preSel = el("select","inp");
+    [["N","No"],["Y","Yes"]].forEach(function(p){
+      var o = el("option", null, p[1]); o.value = p[0];
+      if((r.preFormation || "N") === p[0]) o.selected = true;
+      preSel.appendChild(o);
+    });
+    lp.appendChild(preSel); two3.appendChild(lp);
+  }
+
+  /* Division — only when this job's estimate has been imported. The options
+     are the estimate's exact strings; anything else wouldn't count. */
+  var divSel = null;
+  (function(){
+    var rows = divisionsFor(r.jobId);
+    if(!rows || r.kind === "buildwrite") return;
+    var sug = suggestDivisions(rows, r.vendor);
+    var ld = el("label","fld");
+    ld.appendChild(el("span","cap","Division (estimate line)"));
+    divSel = el("select","inp");
+    var blank = el("option", null, r.openDivision ? "— pick one —" : "— none —");
+    blank.value = ""; divSel.appendChild(blank);
+    if(sug.length){
+      var g1 = document.createElement("optgroup");
+      g1.label = r.vendor ? (r.vendor + " on the estimate") : "Suggested";
+      sug.forEach(function(x){
+        var o = el("option", null, x.d + (x.e ? ("  —  est " + money(x.e)) : ""));
+        o.value = x.d; g1.appendChild(o);
+      });
+      divSel.appendChild(g1);
+    }
+    var g2 = document.createElement("optgroup");
+    g2.label = "All divisions";
+    rows.forEach(function(x){
+      var o = el("option", null, x.d + (x.e ? ("  —  est " + money(x.e)) : ""));
+      o.value = x.d; g2.appendChild(o);
+    });
+    divSel.appendChild(g2);
+    divSel.value = r.division || "";
+    ld.appendChild(divSel);
+    body.appendChild(ld);
+
+    var hint = null;
+    if(r.division && r.divisionAuto) hint = "Set from the estimate — " + r.vendor + " only appears on this line.";
+    else if(r.openDivision && sug.length > 1) hint = sug.length + " lines on the estimate use " + r.vendor + ". Pick the right one.";
+    else if(r.openDivision) hint = "Without a division this receipt won't count against any budget line.";
+    if(hint){
+      var hp = el("p","notice flat"); hp.style.margin = "-4px 0 0"; hp.textContent = hint;
+      body.appendChild(hp);
+    }
+    if(r.division){
+      var est = divisionEst(r.jobId, r.division);
+      if(est != null && est > 0){
+        var spent = 0;
+        S.receipts.forEach(function(x){ if(x.jobId === r.jobId && x.division === r.division) spent += (x.total||0); });
+        var over = spent > est;
+        var ep = el("div","rsub"); ep.style.marginTop = "6px";
+        ep.appendChild(el("span", over ? "tag review" : null,
+          money(spent) + " logged against " + money(est) + " estimated" + (over ? " — over" : "")));
+        body.appendChild(ep);
+      }
+    }
+  })();
+
+  var itemsUI = renderItemsSection(r, body);
+
+  if(r.ocr){
+    var det = el("div");
+    det.appendChild(el("div","seclabel","What the reader saw"));
+    var pairs = [["Vendor",r.ocr.vendor||"—"],["Date",r.ocr.date||"—"],["Total",r.ocr.total==null?"—":money(r.ocr.total)],
+                 ["Tax",r.ocr.tax==null?"—":money(r.ocr.tax)],["Card",r.ocr.cardLast4?("•••• "+r.ocr.cardLast4):"—"],
+                 ["Confidence",r.ocr.confidence]];
+    pairs.forEach(function(p){
+      var k = el("div","kv"); k.appendChild(el("span","k",p[0])); k.appendChild(el("span","v",String(p[1])));
+      det.appendChild(k);
+    });
+    body.appendChild(det);
+  }
+
+  var save = el("button","btn", r.status==="review" ? "Looks right — clear it" : "Save changes");
+  save.onclick = function(){
+    var num = function(v){ var n = parseFloat(String(v).replace(/[^0-9.\-]/g,"")); return isNaN(n)?null:n; };
+    var jv = sel.value, patch = {
+      vendor: f.vendor.value.trim() || null,
+      date: f.date.value || null,
+      total: num(f.total.value),
+      tax: num(f.tax.value),
+      receiptNo: f.receiptNo.value.trim() || null,
+      method: f.method.value,
+      note: ta.value.trim(),
+      editedByUser: true,
+      status: "ok", reviewReason: null, dupOf: null
+    };
+    if(streamSel) patch.stream = streamSel.value;
+    if(preSel) patch.preFormation = preSel.value;
+    if(divSel){
+      patch.division = divSel.value || null;
+      patch.openDivision = !divSel.value;
+      patch.divisionAuto = false;
+    }
+    var named = itemsUI.collect();
+    if(named.length){
+      patch.items = named;
+      patch.openNames = openNameCount(named);
+    }
+    if(jv.indexOf("bw::")===0){
+      patch.kind="buildwrite"; patch.jobId="buildwrite"; patch.jobName="BuildWrite"; patch.category=jv.slice(4);
+      patch.division = null; patch.openDivision = false; patch.divisionAuto = false;
+    }
+    else {
+      var j = S.jobs.filter(function(x){return x.id===jv;})[0];
+      patch.kind="job"; patch.jobId=jv; patch.jobName = j?j.name:r.jobName; patch.category=null;
+    }
+    save.disabled = true;
+    S.db.doc("receipts/"+r.id).update(patch).then(function(){
+      itemsUI.learn();
+      if(rememberCard && rememberCard.box.checked && patch.method) saveCard(rememberCard.last4, patch.method);
+      show("list"); toast("Saved");
+    }).catch(function(){ save.disabled=false; toast("Couldn't save that — try again"); });
+  };
+  body.appendChild(save);
+
+  /* Deleting is for junk — a bad scan, a duplicate photo, something personal
+     that shouldn't be here. It takes the photo with it and cannot be undone,
+     so it asks plainly rather than relying on a second tap being noticed. */
+  var delWrap = el("div"); delWrap.style.marginTop = "6px";
+  var del2 = el("button","btn dngr","Delete this receipt");
+  del2.onclick = function(){
+    delWrap.innerHTML = "";
+    var warn = el("p","notice");
+    warn.textContent = isFiled(r)
+      ? "This one is already in a spreadsheet. Deleting it here removes the photo and the line-item detail; the Excel row stays where it is. Sure?"
+      : "This removes the receipt and its photo for good. The scan can't be recovered. Sure?";
+    delWrap.appendChild(warn);
+    var two = el("div","two");
+    var yes = el("button","btn dngr","Yes, delete it");
+    yes.onclick = function(){
+      yes.disabled = true;
+      S.db.doc("receipts/"+r.id).delete().then(function(){
+        if(r.assetId && S.assets) S.assets.delete(r.assetId).catch(function(){});
+        show("list"); toast("Deleted");
+      }).catch(function(){ yes.disabled = false; toast("Couldn't delete that"); });
+    };
+    var no = el("button","btn sec","Keep it");
+    no.onclick = function(){ delWrap.innerHTML = ""; delWrap.appendChild(del2); };
+    two.appendChild(yes); two.appendChild(no);
+    delWrap.appendChild(two);
+  };
+  delWrap.appendChild(del2);
+  body.appendChild(delWrap);
+
+}
+
+/* ============================ export ============================ */
+function renderExport(){
+  var body = $("exportbody"); body.innerHTML = "";
+  var groups = {};
+  /* only what still needs filing — a filed receipt must never be offered again */
+  var pending = allRows().filter(function(r){ return !isFiled(r); });
+  var already = filedCount();
+  if(already){
+    var fn = el("p","notice flat"); fn.style.margin = "0 0 14px";
+    fn.textContent = already + (already === 1 ? " receipt has" : " receipts have") +
+      " already been filed and won't be offered again. This tab shows what's left.";
+    body.appendChild(fn);
+  }
+  pending.forEach(function(r){
+    var key = r.kind==="buildwrite" ? "buildwrite" : r.jobId;
+    if(!groups[key]) groups[key] = {jobId:key, name: r.kind==="buildwrite" ? "BuildWrite" : (r.jobName||"Job"), rows:[], total:0};
+    groups[key].rows.push(r);
+    if(r.total) groups[key].total += r.total;
+  });
+  var keys = Object.keys(groups);
+  if(!keys.length){
+    var e = el("div","empty");
+    if(already){
+      e.appendChild(el("b",null,"Everything's filed"));
+      e.appendChild(el("div",null,"Nothing is waiting. Scan a receipt and it'll appear here ready to go."));
+    } else {
+      e.appendChild(el("b",null,"Nothing to export yet"));
+      e.appendChild(el("div",null,"Scan a receipt and pick a job, and it shows up here ready for its spreadsheet."));
+    }
+    body.appendChild(e);
+    return;
+  }
+  /* The one action here that ends with files on the F: drive. The page cannot
+     do it itself -- it runs in a frame, with no reach to the disk and no way
+     to call Claude -- so it hands off to the desktop app through its claude://
+     link, prompt and folders already loaded. A framed page may not be allowed
+     to fire an app link at all; if nothing happens, the fallback says so
+     rather than leaving a button that looks broken. */
+  var act = el("div"); act.style.margin = "0 0 20px";
+  var fileBtn = el("button","btn","File these now");
+  fileBtn.onclick = function(){ fileWithClaude(fileBtn); };
+  act.appendChild(fileBtn);
+  var sub = el("p","destnote"); sub.style.margin = "8px 0 0";
+  sub.textContent = "Opens Claude with your Jobs and Tax & Accounting folders attached. "
+    + "The sheet and the receipt images land in the right Receipts folders, and you paste "
+    + "the rows into the spreadsheet.";
+  act.appendChild(sub);
+  var hf = el("div","notice"); hf.id = "handoff-fallback"; hf.hidden = true;
+  hf.style.marginTop = "10px";
+  act.appendChild(hf);
+  body.appendChild(act);
+
+  keys.forEach(function(k){
+    var g = groups[k];
+    var head = el("div","grouphead");
+    head.appendChild(el("h2",null,g.name));
+    head.appendChild(el("span","tot", money(g.total)));
+    body.appendChild(head);
+    var sub = el("div","rsub"); sub.style.marginBottom="8px";
+    sub.appendChild(el("span",null,g.rows.length + (g.rows.length===1?" receipt":" receipts")));
+    var isBW = g.jobId === "buildwrite";
+    var hasDiv = !isBW && !!divisionsFor(g.jobId);
+    if(isBW){
+      sub.appendChild(el("span","dot","·"));
+      sub.appendChild(el("span",null,"Expense Log layout"));
+      var nocat = g.rows.filter(function(r){ return !r.category && !r.splits && !r.queued; }).length;
+      if(nocat) sub.appendChild(el("span","tag review", nocat + " with no category"));
+    }
+    if(hasDiv){
+      var nodiv = g.rows.filter(function(r){ return !r.division && !r.queued; }).length;
+      sub.appendChild(el("span","dot","·"));
+      sub.appendChild(el("span",null,"Receipts-tab layout"));
+      if(nodiv) sub.appendChild(el("span","tag review", nodiv + " with no division"));
+    }
+    body.appendChild(sub);
+    if(hasDiv || isBW){
+      var note = el("p","notice flat"); note.style.margin = "0 0 10px";
+      note.textContent = isBW
+        ? "These go on the Expense Log tab of your Deductible Expense Tracker, and the Category Summary picks them up. Anything marked not a business expense is left out."
+        : "These go on the Receipts tab of " + g.name + "'s cost estimate, where the Paid column picks them up.";
+      body.appendChild(note);
+    }
+
+  });
+
+  /* One download for the whole lot, kept at the bottom and kept honest: it is
+     a copy to hand someone, not the filing route. Nothing here touches F:. */
+  var allBtn = el("button","btn sec","Export All (download)");
+  allBtn.style.marginTop = "24px";
+  allBtn.onclick = function(){
+    exportAll(keys.map(function(k){ return groups[k]; }), allBtn);
+  };
+  body.appendChild(allBtn);
+  var fb = el("div","destnote"); fb.style.marginTop = "6px";
+  fb.textContent = "A zip of every sheet and receipt image above — for a copy to hand someone, "
+    + "or if Claude can't reach your PC. It doesn't update anything and doesn't mark anything filed.";
+  body.appendChild(fb);
+}
+
+/* The folder line under each destination: bound, bindable, or unavailable. */
+/* The File System Access API used to live here: a folder picker so the page
+   could write exports straight into a job folder. It cannot work. A published
+   artifact runs inside a frame and the browser refuses showDirectoryPicker to
+   a framed page with a SecurityError -- in every browser, Chrome included.
+   Removed rather than left disabled, because it put a dead end in front of
+   Stephen twice. Claude writes the files; the Export tab downloads. */
+function csvCell(v){
+  var s = v==null ? "" : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+/* The item names that belong to one category of a split, so a line in the
+   spreadsheet says what was actually bought rather than just an amount. */
+function itemsForCategory(r, cat, alsoUnassigned){
+  var names = (r.items||[]).filter(function(it){
+    if(cat == null) return true;
+    if(it.cat === cat) return true;
+    return alsoUnassigned && !it.cat;
+  }).map(itemLabel).filter(Boolean);
+  return names.join("; ");
+}
+/* The Expense Log tab of the Deductible Expense Tracker, column for column.
+   Anything marked "Not a business expense" is left out entirely — it does not
+   belong in a deductible log — and reported in the total row instead. */
+function buildExpenseLogCsv(g, names){
+  var head = ["Date","Vendor / Paid To","Description","Category","Income Stream",
+              "Job / Project (optional)","Payment Method","Amount","Receipt Saved?","Notes","Pre-Formation Cost?"];
+  var lines = [head.join(",")];
+  var rows = g.rows.slice().sort(function(a,b){ return (a.date||a.capturedAt) < (b.date||b.capturedAt) ? -1 : 1; });
+  var logged = 0, excluded = 0, uncategorised = 0;
+
+  rows.forEach(function(r){
+    var date = r.date || (r.capturedAt||"").slice(0,10);
+    var stream = r.stream || INCOME_STREAMS[0];
+    var pre = r.preFormation || "N";
+    var saved = r.assetId ? "Y" : "N";
+    var put = function(amount, cat, desc, note){
+      if(cat === PERSONAL){ excluded += (amount || 0); return; }
+      if(!cat) uncategorised++;
+      lines.push([
+        date, r.vendor || "", (desc || "").slice(0,160), cat || "",
+        stream, "", r.method || "",
+        amount == null ? "" : Number(amount).toFixed(2),
+        saved, note || "", pre
+      ].map(csvCell).join(","));
+      logged += (amount || 0);
+    };
+    var notes = [];
+    if(r.note) notes.push(r.note);
+    /* A supply invoice is substantiated by its number, so record it the way a
+       till receipt's number is recorded. Terms go down too: they are what
+       shows this was settled at the counter rather than left outstanding. */
+    if(r.docType === "invoice" && r.invoiceNo) notes.push("Invoice " + r.invoiceNo);
+    else if(r.receiptNo) notes.push("Receipt " + r.receiptNo);
+    if(r.docType === "invoice" && r.terms) notes.push("Terms " + r.terms);
+    if(r.ocr && r.ocr.cardLast4) notes.push("Card ending " + r.ocr.cardLast4);
+    if(names && names[r.id]) notes.push(names[r.id]);
+
+    if(r.splits && r.splits.length){
+      r.splits.forEach(function(s, k){
+        put(s.amount, s.category, itemsForCategory(r, s.category, k===0), k===0 ? notes.join(". ") : "");
+      });
+    } else {
+      put(r.total, r.category || "", itemsForCategory(r, null), notes.join(". "));
+    }
+  });
+
+  logged = Math.round(logged*100)/100;
+  excluded = Math.round(excluded*100)/100;
+  var tail = [];
+  if(excluded) tail.push(money(excluded) + " left out as not a business expense");
+  if(uncategorised) tail.push(uncategorised + " row(s) have no category and will not total");
+  lines.push(["","TOTAL","","","","","",logged.toFixed(2),"",tail.join("; "),""].map(csvCell).join(","));
+  return lines.join("\r\n");
+}
+
+function buildCsv(g){
+  var head = ["Date","Vendor","Amount","Receipt total","Tax","Receipt #","Job","Category","Items","Note","Status","Image file"];
+  var lines = [head.join(",")];
+  var rows = g.rows.slice().sort(function(a,b){ return (a.date||a.capturedAt) < (b.date||b.capturedAt) ? -1 : 1; });
+  var grand = 0, business = 0;
+
+  rows.forEach(function(r,i){
+    var common = {
+      date: r.date || (r.capturedAt||"").slice(0,10),
+      vendor: r.vendor || "",
+      receiptTotal: r.total==null ? "" : Number(r.total).toFixed(2),
+      job: r.kind==="buildwrite" ? "BuildWrite" : (r.jobName||""),
+      img: imageName(r,i),
+      status: r.status==="ok" ? "" : r.status
+    };
+    var put = function(amount, cat, items, note, tax){
+      lines.push([
+        common.date, common.vendor,
+        amount==null ? "" : Number(amount).toFixed(2),
+        common.receiptTotal,
+        tax==null ? "" : Number(tax).toFixed(2),
+        r.receiptNo || "", common.job, cat || "", items || "", note || "",
+        common.status, common.img
+      ].map(csvCell).join(","));
+      if(amount!=null){
+        grand += amount;
+        if(cat !== PERSONAL) business += amount;
+      }
+    };
+
+    if(r.splits && r.splits.length){
+      // one line per category, tax already spread through the amounts
+      r.splits.forEach(function(s, k){
+        put(s.amount, s.category, itemsForCategory(r, s.category, k===0), k===0 ? (r.note||"") : "", null);
+      });
+    } else {
+      put(r.total, r.category || "", itemsForCategory(r, null), r.note || "", r.tax);
+    }
+  });
+
+  grand = Math.round(grand*100)/100;
+  business = Math.round(business*100)/100;
+  var blanks = function(n){ var a=[]; while(a.length<n) a.push(""); return a; };
+  lines.push(["","TOTAL",grand.toFixed(2)].concat(blanks(9)).map(csvCell).join(","));
+  if(Math.abs(grand - business) >= 0.01){
+    lines.push(["","BUSINESS TOTAL",business.toFixed(2)].concat(blanks(9)).map(csvCell).join(","));
+  }
+  return lines.join("\r\n");
+}
+function imageName(r,i){
+  var n = String(i+1); while(n.length<3) n = "0"+n;
+  return n + "_" + (r.date || (r.capturedAt||"").slice(0,10)) + "_" + safeName(r.vendor||"unread") + ".jpg";
+}
+
+/* Stephen's convention for a receipt filed in a job's Cost/Receipts folder:
+     {Client}{Project}_Receipt {Vendor} {What}_{MMDDYY}
+   Vendor comes first so the folder groups by vendor when sorted by name; a
+   same-vendor, same-day collision takes the last 4 of the total, as his
+   README says. */
+/* A filename label: words only, no quantities, prices or punctuation, and
+   short enough to read at a glance. "Plus-grade gasoline, 19.451 gal at
+   $4.529/gal" becomes "Plus-grade gasoline". */
+function labelWords(s){
+  var t = String(s||"")
+    .split(/[,(]/)[0]                       // drop everything after a comma or bracket
+    .replace(/['’]/g,"")               // Lowe's -> Lowes, as his own convention has it
+    .replace(/[^A-Za-z0-9 \-]+/g," ")       // punctuation out
+    .replace(/\b\d+(\.\d+)?\b/g," ")        // bare numbers out
+    .replace(/\b(gal|gallons?|oz|lb|lbs|ea|each|pk|pack|ct|qty|x)\b/gi," ")
+    .replace(/\s+/g," ")
+    .trim();
+  var words = t.split(" ").filter(Boolean).slice(0,4);
+  var out = words.join(" ");
+  if(out.length > 28) out = out.slice(0,28).replace(/\s+\S*$/,"");
+  return out;
+}
+function whatOf(r){
+  if(r.division) return labelWords(r.division.replace(/\s*\(.*?\)\s*/g," ").split(/[\/,]/)[0]);
+  /* the biggest line is what the receipt is really "for" */
+  var best = null;
+  (r.items||[]).forEach(function(x){
+    if(x.price == null) return;
+    if(!best || x.price > best.price) best = x;
+  });
+  if(best){ var lw = labelWords(itemLabel(best)); if(lw) return lw; }
+  var any = (r.items||[]).filter(function(x){ return x.name || x.clear; })[0];
+  if(any){ var lw2 = labelWords(itemLabel(any)); if(lw2) return lw2; }
+  if(r.category){ var lc = labelWords(r.category); if(lc) return lc; }
+  return r.note ? labelWords(r.note) || "Receipt" : "Receipt";
+}
+function receiptFileNames(jobName, rows){
+  var base = {}, out = {};
+  var keyOf = function(r){
+    return safeName(jobName) + "_Receipt " + labelWords(r.vendor || "Unread") + " " +
+           whatOf(r) + "_" + mmddyy(r.date || r.capturedAt);
+  };
+  rows.forEach(function(r){ var k = keyOf(r); (base[k] = base[k] || []).push(r.id); });
+  rows.forEach(function(r){
+    var k = keyOf(r);
+    if(base[k].length > 1 && r.total != null){
+      var cents = Math.round(r.total * 100).toString();
+      k = k.replace(/_(\d{6})$/, " " + cents.slice(-4) + "_$1");
+    }
+    out[r.id] = k + ".jpg";
+  });
+  return out;
+}
+
+/* The Receipts tab of a job's cost estimate, column for column. The Division
+   string has to match the estimate exactly — Sheet1's Paid column is a SUMIFS
+   on it, so a receipt with no division lands nowhere. */
+/* The printed line descriptions that were put on one division, so each
+   exported row says what it actually bought rather than repeating the lot. */
+function linesForDivision(r, division){
+  var hits = (r.items || []).filter(function(it){ return it.cat === division; });
+  if(!hits.length) return "";
+  return hits.map(itemLabel).filter(Boolean).join("; ");
+}
+
+function buildJobCsv(g, names){
+  var head = ["Date","Vendor","Division (must match estimate)","Description","Amount","Method","Receipt File","Notes"];
+  var lines = [head.join(",")];
+  var rows = g.rows.slice().sort(function(a,b){ return (a.date||a.capturedAt) < (b.date||b.capturedAt) ? -1 : 1; });
+  var sum = 0, undivided = 0;
+  rows.forEach(function(r){
+    var desc = (r.items||[]).map(itemLabel).filter(Boolean).join("; ") || r.note || "";
+    var notes = [];
+    if(r.note && desc !== r.note) notes.push(r.note);
+    if(r.docType === "invoice" && r.invoiceNo) notes.push("Invoice " + r.invoiceNo);
+    else if(r.receiptNo) notes.push("Receipt " + r.receiptNo);
+    if(r.jobCode) notes.push("Job " + r.jobCode);
+    if(r.terms) notes.push("Terms " + r.terms);
+    if(r.ocr && r.ocr.cardLast4) notes.push("Card ending " + r.ocr.cardLast4);
+
+    /* An invoice that spans budget lines becomes one row per line, each with
+       its share of tax, so every division is charged what it actually used.
+       One lumped row would hit a single budget line with the whole invoice. */
+    var parts = (r.splitBy === "division" && r.splits && r.splits.length)
+      ? r.splits.map(function(s){
+          return { division: s.category === "— no division —" ? "" : s.category,
+                   amount: s.amount,
+                   desc: linesForDivision(r, s.category) || desc };
+        })
+      : [{ division: r.division || "", amount: r.total, desc: desc }];
+
+    parts.forEach(function(p, i){
+      var n2 = notes.slice();
+      if(parts.length > 1){
+        n2.push("Part " + (i+1) + " of " + parts.length +
+                " of a " + money(r.total) + " invoice, tax apportioned");
+      } else if(r.tax != null){
+        n2.push("Tax " + Number(r.tax).toFixed(2));
+      }
+      if(!p.division){ n2.push("NO DIVISION - will not count against the budget"); undivided++; }
+      lines.push([
+        r.date || (r.capturedAt||"").slice(0,10),
+        r.vendor || "",
+        p.division,
+        String(p.desc || "").slice(0,160),
+        p.amount == null ? "" : Number(p.amount).toFixed(2),
+        r.method || "",
+        names[r.id] || "",
+        n2.join(". ")
+      ].map(csvCell).join(","));
+      sum += (p.amount || 0);
+    });
+  });
+  lines.push(["","TOTAL","","",Math.round(sum*100)/100 ? (Math.round(sum*100)/100).toFixed(2) : "0.00","","",
+    undivided ? (undivided + " row(s) have no division and will not count") : ""].map(csvCell).join(","));
+  return lines.join("\r\n");
+}
+function baseName(g){
+  // Stephen's convention: issued documents carry the date they went out.
+  return safeName(g.name) + "_Receipt Log_" + mmddyy();
+}
+function saveFile(name, data){
+  if(!S.downloads){ toast("Downloads aren't available in this view"); return Promise.resolve(); }
+  return S.downloads.save({filename:name, data:data}).then(function(){
+    toast("Saved " + name);
+  }).catch(function(e){
+    if(e && e.code === "declined") return;
+    toast("Couldn't save that file");
+  });
+}
+/* A job with an imported estimate exports in its Receipts-tab shape, with the
+   image files named the way that tab's "Receipt File" column expects. */
+function groupNames(g){
+  return receiptFileNames(g.name, g.rows);
+}
+function csvFor(g, names){
+  if(g.jobId === "buildwrite") return buildExpenseLogCsv(g, names);
+  return divisionsFor(g.jobId) ? buildJobCsv(g, names) : buildCsv(g);
+}
+/* A destination's folder, if one has been bound and is still permitted. */
+/* Spreadsheet only: straight into the bound folder, else a download. */
+function exportCsv(g, btn){
+  var names = groupNames(g);
+  var name = baseName(g) + ".csv";
+  var body = csvFor(g, names);
+  var label = btn ? btn.textContent : "";
+  if(btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  var done = function(){ if(btn){ btn.disabled = false; btn.textContent = label; } };
+
+  /* A plain download. Writing straight into a folder needs the File System
+     Access API, which the browser refuses to a page running inside a frame --
+     and a published artifact always runs inside one. Tried, blocked, settled:
+     Claude does the writing instead. Do not re-wire a folder picker here. */
+  return Promise.resolve(saveFile(name, body)).then(function(){
+    done();
+    toast("Saved " + name);
+  }).catch(function(){
+    done();
+    toast("Couldn't save that file");
+  });
+}
+
+/* Full packet into a bound folder: the spreadsheet plus every image as its own
+   file, named to match the Receipt File column. No zip to unpack. */
+/* minimal store-only ZIP writer */
+var CRC_T = (function(){
+  var t = new Uint32Array(256);
+  for(var n=0;n<256;n++){
+    var c = n;
+    for(var k=0;k<8;k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes){
+  var c = 0xFFFFFFFF;
+  for(var i=0;i<bytes.length;i++) c = CRC_T[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function dosTime(d){
+  return ((d.getHours()<<11) | (d.getMinutes()<<5) | (Math.floor(d.getSeconds()/2))) & 0xFFFF;
+}
+function dosDate(d){
+  return (((d.getFullYear()-1980)<<9) | ((d.getMonth()+1)<<5) | d.getDate()) & 0xFFFF;
+}
+function makeZip(entries){
+  var enc = new TextEncoder(), parts = [], central = [], offset = 0, now = new Date();
+  var t = dosTime(now), dt = dosDate(now);
+  entries.forEach(function(e){
+    var nameB = enc.encode(e.name), crc = crc32(e.bytes), len = e.bytes.length;
+    var lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0,true);
+    lh.setUint16(8,0,true); lh.setUint16(10,t,true); lh.setUint16(12,dt,true);
+    lh.setUint32(14,crc,true); lh.setUint32(18,len,true); lh.setUint32(22,len,true);
+    lh.setUint16(26,nameB.length,true); lh.setUint16(28,0,true);
+    parts.push(new Uint8Array(lh.buffer), nameB, e.bytes);
+
+    var ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true);
+    ch.setUint16(8,0,true); ch.setUint16(10,0,true); ch.setUint16(12,t,true); ch.setUint16(14,dt,true);
+    ch.setUint32(16,crc,true); ch.setUint32(20,len,true); ch.setUint32(24,len,true);
+    ch.setUint16(28,nameB.length,true); ch.setUint16(30,0,true); ch.setUint16(32,0,true);
+    ch.setUint16(34,0,true); ch.setUint16(36,0,true); ch.setUint32(38,0,true);
+    ch.setUint32(42,offset,true);
+    central.push(new Uint8Array(ch.buffer), nameB);
+    offset += 30 + nameB.length + len;
+  });
+  var cSize = central.reduce(function(a,b){ return a + b.length; },0);
+  var eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0,0x06054b50,true); eo.setUint16(4,0,true); eo.setUint16(6,0,true);
+  eo.setUint16(8,entries.length,true); eo.setUint16(10,entries.length,true);
+  eo.setUint32(12,cSize,true); eo.setUint32(16,offset,true); eo.setUint16(20,0,true);
+  return new Blob(parts.concat(central).concat([new Uint8Array(eo.buffer)]), {type:"application/zip"});
+}
+function imageBytes(r){
+  var src = r.localUrl || (r.assetId ? RR_blobUrl(r.assetId) : null);
+  if(!src) return Promise.resolve(null);
+  return fetch(src).then(function(res){
+    if(!res.ok) throw new Error("bad");
+    return res.arrayBuffer();
+  }).then(function(buf){ return new Uint8Array(buf); })
+  .catch(function(){
+    // network route blocked — repaint through a canvas instead
+    return new Promise(function(res){
+      var im = new Image();
+      im.onload = function(){
+        var c = document.createElement("canvas");
+        c.width = im.naturalWidth; c.height = im.naturalHeight;
+        c.getContext("2d").drawImage(im,0,0);
+        c.toBlob(function(b){
+          if(!b) return res(null);
+          b.arrayBuffer().then(function(ab){ res(new Uint8Array(ab)); }).catch(function(){ res(null); });
+        },"image/jpeg",0.85);
+      };
+      im.onerror = function(){ res(null); };
+      im.src = src;
+    });
+  });
+}
+function imageBlob(r){
+  return imageBytes(r).then(function(b){
+    return b ? new Blob([b], {type:"image/jpeg"}) : null;
+  });
+}
+function exportZip(g, btn){
+  var label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Gathering…";
+  var rows = g.rows.slice().sort(function(a,b){ return (a.date||a.capturedAt) < (b.date||b.capturedAt) ? -1 : 1; });
+  var names = groupNames(g);
+  var entries = [{name: baseName(g)+".csv", bytes: new TextEncoder().encode(csvFor(g, names))}];
+  var i = 0, missing = 0;
+  function next(){
+    if(i >= rows.length){
+      var blob = makeZip(entries);
+      btn.disabled = false; btn.textContent = label;
+      return saveFile(baseName(g)+".zip", blob).then(function(){
+        if(missing) toast(missing + " image" + (missing>1?"s":"") + " couldn't be included");
+      });
+    }
+    var r = rows[i];
+    btn.textContent = "Gathering " + (i+1) + "/" + rows.length;
+    return imageBytes(r).then(function(bytes){
+      if(bytes) entries.push({name: (names && names[r.id]) || imageName(r,i), bytes: bytes});
+      else missing++;
+      i++;
+      return next();
+    });
+  }
+  next().catch(function(){
+    btn.disabled = false; btn.textContent = label;
+    toast("Couldn't build the packet");
+  });
+}
+
+/* ===================== hand-off to Claude ===================== */
+/* The filing itself happens in the Claude desktop app, which can reach the F:
+   drive; this page cannot. claude:// opens it with the prompt already in the
+   composer and both destination folders offered for attach. Folders always
+   ask for confirmation on the other side -- that is the desktop app's rule,
+   not something to try to skip. */
+var FILE_PROMPT  = "file my receipts";
+var FILE_FOLDERS = ["F:\\Roberts and Assoc\\Jobs",
+                    "F:\\BuildWrite Projects, llc. Business\\Tax & Accounting"];
+function claudeLink(){
+  var u = "claude://cowork/new?q=" + encodeURIComponent(FILE_PROMPT);
+  FILE_FOLDERS.forEach(function(f){ u += "&folder=" + encodeURIComponent(f); });
+  return u;
+}
+/* Whether a framed page may fire an app link is the browser's call and differs
+   by browser. There is no API that answers it, so: fire, then watch for the
+   window losing focus. Focus never leaves => assume nothing launched and say
+   so, rather than leaving a button that silently does nothing. */
+function fileWithClaude(btn){
+  var left = false;
+  function mark(){ left = true; }
+  window.addEventListener("blur", mark);
+  document.addEventListener("visibilitychange", mark);
+  var url = claudeLink(), w = null;
+  try { w = window.open(url, "_blank"); } catch(e){}
+  if(!w){
+    try {
+      var a = document.createElement("a");
+      a.href = url; a.target = "_blank"; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch(e2){}
+  }
+  var label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Opening Claude…";
+  setTimeout(function(){
+    window.removeEventListener("blur", mark);
+    document.removeEventListener("visibilitychange", mark);
+    btn.disabled = false; btn.textContent = label;
+    if(left) { hideHandoffFallback(); toast("Handed off to Claude"); }
+    else showHandoffFallback();
+  }, 1800);
+}
+function hideHandoffFallback(){
+  var box = $("handoff-fallback");
+  if(box){ box.hidden = true; box.innerHTML = ""; }
+}
+function showHandoffFallback(){
+  var box = $("handoff-fallback");
+  if(!box) return;
+  box.innerHTML = "";
+  box.hidden = false;
+  box.appendChild(el("div",null,
+    "This browser won't let the page open Claude for you. Use the File Receipts "
+    + "shortcut on your desktop, or open Claude and say the words:"));
+  var p = el("div"); p.style.cssText = "margin-top:8px;display:flex;gap:10px;align-items:center";
+  var code = el("span"); code.style.cssText = "font-family:var(--font-data);font-weight:600";
+  code.textContent = FILE_PROMPT;
+  p.appendChild(code);
+  var copy = el("button","linkbtn","Copy");
+  copy.onclick = function(){
+    try {
+      navigator.clipboard.writeText(FILE_PROMPT).then(function(){ toast("Copied"); },
+        function(){ toast("Couldn't copy — type it in"); });
+    } catch(e){ toast("Couldn't copy — type it in"); }
+  };
+  p.appendChild(copy);
+  box.appendChild(p);
+}
+
+/* Every pending group in one zip, each group in its own folder inside it. */
+function exportAll(groupList, btn){
+  var label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Gathering…";
+  var entries = [], missing = 0, gi = 0;
+  function nextGroup(){
+    if(gi >= groupList.length){
+      var blob = makeZip(entries);
+      btn.disabled = false; btn.textContent = label;
+      return saveFile("Receipt Run_Export_" + mmddyy() + ".zip", blob).then(function(){
+        if(missing) toast(missing + " image" + (missing>1?"s":"") + " couldn't be included");
+      });
+    }
+    var g = groupList[gi];
+    var dir = safeName(g.name) + "/";
+    var rows = g.rows.slice().sort(function(a,b){
+      return (a.date||a.capturedAt) < (b.date||b.capturedAt) ? -1 : 1;
+    });
+    var names = groupNames(g);
+    entries.push({name: dir + baseName(g) + ".csv",
+                  bytes: new TextEncoder().encode(csvFor(g, names))});
+    var i = 0;
+    function nextRow(){
+      if(i >= rows.length){ gi++; return nextGroup(); }
+      var r = rows[i];
+      btn.textContent = "Gathering " + g.name + " " + (i+1) + "/" + rows.length;
+      return imageBytes(r).then(function(bytes){
+        if(bytes) entries.push({name: dir + ((names && names[r.id]) || imageName(r,i)), bytes: bytes});
+        else missing++;
+        i++;
+        return nextRow();
+      });
+    }
+    return nextRow();
+  }
+  nextGroup().catch(function(){
+    btn.disabled = false; btn.textContent = label;
+    toast("Couldn't build the packet");
+  });
+}
+
+/* ============================ nav ============================ */
+/* "split" is a view with no nav button of its own — reached from a receipt. */
+var VIEWS = ["scan","list","review","totals","export","split","detail","cats"];
+function show(v){
+  VIEWS.forEach(function(k){
+    var sec = $("v-"+k);
+    if(sec) sec.hidden = (k !== v);
+    var nb = $("nav-"+k);
+    if(nb) nb.setAttribute("aria-current", String(k === v));
+  });
+  document.querySelector("main").scrollTop = 0;
+}
+
+/* ============================ boot ============================ */
+function wire(){
+  // The label's `for` does the opening natively — no scripted .click(), which
+  // some iOS webviews drop. Keyboard users still need a way in.
+  ["shutter","pickfile"].forEach(function(id){
+    $(id).addEventListener("keydown", function(e){
+      if(e.key === "Enter" || e.key === " "){ e.preventDefault(); $(id === "shutter" ? "camin" : "libin").click(); }
+    });
+  });
+  $("shutter").addEventListener("click", function(){ diag("camera", "Opening camera…"); });
+  $("pickfile").addEventListener("click", function(){ diag("camera", "Opening photo picker…"); });
+
+  // Belt and braces: some webviews fire `input` but not `change`, and some
+  // deliver the file only once the page is visible again.
+  ["camin","libin"].forEach(function(id){
+    var inp = $(id);
+    ["change","input"].forEach(function(evt){
+      inp.addEventListener(evt, function(){ takeFrom(inp, evt); });
+    });
+  });
+  /* an extra page joins the capture already in hand rather than starting a
+     new one -- the job picker stays open throughout */
+  ["change","input"].forEach(function(evt){
+    $("pagein").addEventListener(evt, function(){
+      var inp = $("pagein"), f = null;
+      try{ f = inp.files && inp.files[0]; }catch(e){}
+      if(!f || !S.pending) return;
+      try{ inp.value = ""; }catch(e){}
+      var p = S.pending;
+      p.pages = (p.pages && p.pages.length ? p.pages : [p.file]).concat([f]);
+      p.pageCount = p.pages.length;
+      diag("camera", "Page " + p.pages.length + " added.");
+      showScanPreview();
+    });
+  });
+  document.addEventListener("visibilitychange", function(){
+    if(document.hidden) return;
+    setTimeout(function(){ takeFrom($("camin"),"return"); takeFrom($("libin"),"return"); }, 150);
+  });
+  window.addEventListener("focus", function(){
+    setTimeout(function(){ takeFrom($("camin"),"focus"); takeFrom($("libin"),"focus"); }, 150);
+  });
+  (function(){
+    var box = $("q"), clr = $("qclear"), t = null;
+    function apply(){
+      S.q = box.value;
+      clr.hidden = !box.value;
+      renderList();
+    }
+    box.addEventListener("input", function(){ clearTimeout(t); t = setTimeout(apply, 120); });
+    box.addEventListener("search", apply);
+    box.addEventListener("keydown", function(e){ if(e.key === "Enter"){ e.preventDefault(); box.blur(); apply(); } });
+    clr.onclick = function(){ box.value = ""; apply(); box.focus(); };
+  })();
+  $("pick-close").onclick = function(){ closePicker(false); };
+  $("dv-back").onclick = function(){ show("list"); };
+  $("cv-back").onclick = function(){ closePicker(false); show("scan"); };
+  $("sv-back").onclick = function(){ show("list"); };
+  $("nj-close").onclick = function(){ $("sheet-newjob").hidden = true; };
+  $("nj-save").onclick = createJob;
+  wireEdges();
+  $("nj-name").onkeydown = function(e){ if(e.key==="Enter") createJob(); };
+  VIEWS.forEach(function(k){ var nb = $("nav-"+k); if(nb) nb.onclick = function(){ show(k); }; });
+  window.addEventListener("online", function(){ flush(); });
+  document.addEventListener("visibilitychange", function(){ if(!document.hidden) flush(); });
+  try{ S.lastJobIds = JSON.parse(localStorage.getItem("rr_last")||"[]") || []; }catch(e){ S.lastJobIds = []; }
+}
+
+function createJob(){
+  var name = $("nj-name").value.trim();
+  if(!name){ $("nj-name").focus(); return; }
+  if(!S.db){ toast("Can't create a job in this view"); return; }
+  var id = "j" + Date.now().toString(36);
+  $("nj-save").disabled = true;
+  S.db.doc("jobs/"+id).set({name:name, kind:"job", archived:false, createdAt:new Date().toISOString()})
+  .then(function(){
+    $("nj-save").disabled = false;
+    $("sheet-newjob").hidden = true;
+    if(S.pending) fileReceipt({jobId:id, jobName:name, kind:"job"});
+    else toast("Created " + name);
+  }).catch(function(){
+    $("nj-save").disabled = false;
+    toast("Couldn't create that job");
+  });
+}
+
+function setMode(txt, bad){
+  var c = $("modechip");
+  c.textContent = txt;
+  c.className = "chip" + (bad ? " bad" : "");
+}
+
+function boot(){
+  window.addEventListener("error", function(e){
+    diag("err", "Script error: " + (e.message || "unknown") + (e.lineno ? (" (line " + e.lineno + ")") : ""), true);
+  });
+  window.addEventListener("unhandledrejection", function(e){
+    var r = e.reason;
+    diag("err", "Failed: " + ((r && (r.message || r.code)) || String(r)), true);
+  });
+  wire();
+  show("scan");
+  renderAll();
+
+  IDB.all().then(function(items){
+    S.queue = items || [];
+    S.queue.forEach(function(q){
+      if(q.blob && !S.objUrls[q.localId]){
+        try{ S.objUrls[q.localId] = URL.createObjectURL(q.blob); }catch(e){}
+      }
+    });
+    renderAll();
+  }).catch(function(){});
+
+  Promise.all([
+    claude.use("db"), claude.use("assets"), claude.use("sample"),
+    claude.use("user"), claude.use("downloads")
+  ]).then(function(r){
+    S.db=r[0]; S.assets=r[1]; S.sample=r[2]; S.user=r[3]; S.downloads=r[4];
+
+    if(!S.db){
+      setMode("Read-only", true);
+      $("shuttersub").textContent = "Storage isn't available in this view, so nothing can be filed from here.";
+      return;
+    }
+    if(!S.assets){
+      S.writable = false;
+      setMode("View only");
+      $("shuttersub").textContent = "You can read what's filed here, but not add to it.";
+    } else {
+      setMode("Ready");
+    }
+
+    S.db.collection("jobs").onSnapshot(function(snap){
+      S.jobs = snap.docs.map(function(d){ var o = Object.assign({}, d.data()||{}); o.id = d.id; return o; })
+        .sort(function(a,b){ return String(a.name||"").localeCompare(String(b.name||"")); });
+      renderAll();
+    }, function(){ setMode("Offline", true); });
+
+    S.db.collection("cards").limit(50).onSnapshot(function(snap){
+      var m = {};
+      snap.docs.forEach(function(d){
+        var o = d.data() || {};
+        if(o.method) m[d.id] = String(o.method);
+      });
+      S.cards = m;
+    }, function(){});
+
+    S.db.collection("jobcodes").limit(200).onSnapshot(function(snap){
+      var m = {};
+      snap.docs.forEach(function(d){
+        var o = d.data() || {};
+        if(o.jobId) m[d.id] = String(o.jobId);
+      });
+      S.jobCodes = m;
+    }, function(){});
+
+    S.db.collection("divisions").limit(50).onSnapshot(function(snap){
+      var m = {};
+      snap.docs.forEach(function(d){ m[d.id] = Object.assign({}, d.data() || {}); });
+      S.divisions = m;
+      renderAll();
+    }, function(){});
+
+    S.db.collection("aliases").limit(500).onSnapshot(function(snap){
+      var m = {};
+      snap.docs.forEach(function(d){
+        var o = d.data() || {};
+        if(o.name) m[d.id] = String(o.name);
+      });
+      S.aliases = m;
+      renderAll();
+    }, function(){});
+
+    S.db.collection("receipts").orderBy("capturedAt","desc").limit(600).onSnapshot(function(snap){
+      S.receipts = snap.docs.map(function(d){ var o = Object.assign({}, d.data()||{}); o.id = d.id; return o; });
+      renderAll();
+    }, function(){ setMode("Offline", true); });
+
+    if(S.sample){
+      S.sample.limits().then(function(l){ S.canImages = !!(l && l.images); })
+        .catch(function(){ S.canImages = false; });
+    }
+    setTimeout(flush, 600);
+  }).catch(function(){
+    setMode("Offline", true);
+  });
+}
+
+if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();
+})();
+</script>
+
+</body></html>
