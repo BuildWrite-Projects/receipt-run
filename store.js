@@ -115,7 +115,53 @@
     });
   }
 
+  /* ---------- jobs come from Job Book ------------------------------------- */
+  /* Job Book is the one list of jobs. Receipt Run shows every Roberts &
+     Associates job from it, so a job added there shows up here with nothing
+     re-typed. Receipt Run's own job records are kept only as links: an older
+     job keeps its Receipt Run id (j_carpenter ...) because receipts and
+     budget lines already point at it, and its bookJobId says which Job Book
+     job it is. A Receipt Run job with no Job Book match is still shown, so
+     nothing disappears. If Job Book can't be read, the app shows its own
+     job records exactly as before. */
+  var JB_BOOK = 'ra';
+  function fetchJobBookJobs() {
+    return client.from('jobbook_jobs').select('id,data').eq('book_id', JB_BOOK)
+      .then(function (r) { return r.error ? null : (r.data || []); }, function () { return null; });
+  }
+  function mergeJobs(own, jb) {
+    if (!jb) return own;
+    var out = new Map(), linked = {};
+    own.forEach(function (d, id) { if (d.bookJobId) linked[d.bookJobId] = id; });
+    jb.forEach(function (row) {
+      var d = row.data || {};
+      var rrId = linked[row.id] || row.id;
+      var mine = own.get(rrId) || {};
+      out.set(rrId, Object.assign({}, mine, {
+        kind: 'job',
+        name: d.name || mine.name || 'Job',
+        folder: d.folder || null,
+        archived: !!d.archived,
+        bookJobId: row.id,
+        bookStatus: d.status || ''
+      }));
+    });
+    own.forEach(function (d, id) {
+      if (out.has(id)) return;
+      if (d.bookJobId && jb.some(function (row) { return row.id === d.bookJobId; })) return;
+      out.set(id, d);
+    });
+    return out;
+  }
+
   function fetchAll(name) {
+    if (name === 'jobs') {
+      return Promise.all([fetchOwn(name), fetchJobBookJobs()])
+        .then(function (r) { return mergeJobs(r[0], r[1]); });
+    }
+    return fetchOwn(name);
+  }
+  function fetchOwn(name) {
     var out = new Map(), from = 0, PAGE = 1000;
     function page() {
       return client.from(TABLE).select('id,data').eq('collection', name).order('id')
@@ -172,6 +218,13 @@
     Object.keys(starting).forEach(function (n) { if (starting[n]) refresh(n).catch(function () {}); });
   }
 
+  /* jobs are a merge of two tables, so a change to either re-reads both */
+  var jobsTimer = null;
+  function refreshJobsSoon() {
+    if (!starting.jobs || jobsTimer) return;
+    jobsTimer = setTimeout(function () { jobsTimer = null; refresh('jobs').catch(function () {}); }, 300);
+  }
+
   function subscribeAll() {
     if (channel) return;
     channel = client.channel('receiptrun-' + uid())
@@ -182,8 +235,11 @@
           var m = cache[row.collection] || (cache[row.collection] = new Map());
           if (p.eventType === 'DELETE') m.delete(row.id);
           else m.set(row.id, row.data || {});
+          if (row.collection === 'jobs') { refreshJobsSoon(); return; }
           schedule(row.collection);
         })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobbook_jobs' },
+        function () { refreshJobsSoon(); })
       .subscribe(function (status) {
         if (status === 'SUBSCRIBED') refreshAll();
       });
@@ -234,9 +290,26 @@
         var d = clone(data || {});
         (cache[name] || (cache[name] = new Map())).set(id, d);
         schedule(name);
-        return client.from(TABLE)
-          .upsert({ user_id: uid(), collection: name, id: id, data: d }, { onConflict: 'user_id,collection,id' })
-          .then(settle(name), networkFail(name));
+        if (name === 'jobs' && !d.bookJobId) {
+          /* A new job goes into Job Book, the one list of jobs, as a prospect
+             with no folder yet. Job Book then shows "Folder: not set" and
+             Claude builds the folder when Stephen says "set up new jobs". If
+             Job Book refuses the write, keep the old behaviour. */
+          var jbData = { name: d.name, bookId: JB_BOOK, status: 'prospect', archived: false,
+                         waiting: false, createdAt: d.createdAt || new Date().toISOString(),
+                         createdIn: 'Receipt Run' };
+          return client.from('jobbook_jobs').insert({ id: id, data: jbData })
+            .then(function (r) {
+              if (r.error) return saveOwn();
+              refreshJobsSoon();
+            }, saveOwn);
+        }
+        return saveOwn();
+        function saveOwn() {
+          return client.from(TABLE)
+            .upsert({ user_id: uid(), collection: name, id: id, data: d }, { onConflict: 'user_id,collection,id' })
+            .then(settle(name), networkFail(name));
+        }
       },
       update: function (patch) {
         var p = clone(patch || {});
