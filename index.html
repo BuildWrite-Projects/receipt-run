@@ -3486,9 +3486,8 @@ function renderExport(){
   fileBtn.onclick = function(){ fileWithClaude(fileBtn); };
   act.appendChild(fileBtn);
   var sub = el("p","destnote"); sub.style.margin = "8px 0 0";
-  sub.textContent = "Opens Claude with your Jobs and Tax & Accounting folders attached. "
-    + "The sheet and the receipt images land in the right Receipts folders, and you paste "
-    + "the rows into the spreadsheet.";
+  sub.textContent = "Saves the receipt photos to Downloads, then opens Claude to file them: "
+    + "rows go into the right spreadsheet and photos into the right Receipts folders.";
   act.appendChild(sub);
   var hf = el("div","notice"); hf.id = "handoff-fallback"; hf.hidden = true;
   hf.style.marginTop = "10px";
@@ -3965,6 +3964,13 @@ function claudeLink(){
    window losing focus. Focus never leaves => assume nothing launched and say
    so, rather than leaving a button that silently does nothing. */
 function fileWithClaude(btn){
+  /* Claude can't fetch the private photos, so the browser saves them to
+     Downloads for the filing routine to move into place (store.js). */
+  if(window.RR_saveFilingPhotos){
+    window.RR_saveFilingPhotos().then(function(n){
+      if(n) toast("Saved " + n + " receipt photo" + (n === 1 ? "" : "s") + " to Downloads for filing");
+    });
+  }
   var left = false;
   function mark(){ left = true; }
   window.addEventListener("blur", mark);

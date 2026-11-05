@@ -356,6 +356,37 @@
       }).then(function (d) { return d.result; });
     }
   };
+  /* ---------- photos for filing ------------------------------------------- */
+  /* Claude can't reach the private photos itself, so when File These Now is
+     pressed the browser (signed in as Stephen) saves each unfiled receipt's
+     photos into Downloads as ReceiptRun_<receipt id>_p<page>.jpg. The filing
+     routine moves them from there into the right Receipts folder, renamed. */
+  window.RR_saveFilingPhotos = function () {
+    if (!session || !cache.receipts) return Promise.resolve(0);
+    var jobs = [];
+    cache.receipts.forEach(function (d, id) {
+      if (d.filedAt) return;
+      var ids = (d.assetIds && d.assetIds.length) ? d.assetIds : (d.assetId ? [d.assetId] : []);
+      ids.forEach(function (a, i) { jobs.push({ asset: a, name: 'ReceiptRun_' + id + '_p' + (i + 1) + '.jpg' }); });
+    });
+    var saved = 0, chain = Promise.resolve();
+    jobs.forEach(function (j) {
+      chain = chain.then(function () {
+        return client.storage.from(CFG.bucket).download(pathFor(j.asset)).then(function (r) {
+          if (r.error || !r.data) return;
+          var url = URL.createObjectURL(r.data);
+          var a = document.createElement('a');
+          a.href = url; a.download = j.name;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+          saved++;
+          return new Promise(function (res) { setTimeout(res, 350); });  // let the browser keep up
+        }).catch(function () {});
+      });
+    });
+    return chain.then(function () { return saved; });
+  };
+
   /* for the one-time side-by-side reading test (test-read.html) */
   window.RR_read = callReader;
 
