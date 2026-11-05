@@ -130,7 +130,43 @@
     return page();
   }
   function refresh(name) {
-    return fetchAll(name).then(function (m) { cache[name] = m; loaded[name] = true; schedule(name); });
+    return fetchAll(name).then(function (m) {
+      cache[name] = m; loaded[name] = true; schedule(name);
+      if (name === 'receipts') prepareFilingLinks();
+    });
+  }
+
+  /* ---------- links for filing -------------------------------------------- */
+  /* Filing is done by Claude on Stephen's PC ("file my receipts"). Claude reads
+     the receipt records from Supabase, but the photos are private, so each
+     unfiled receipt carries time-limited download links (fileLinks) that the
+     PC can fetch straight into the job's Receipts folder. Refreshed whenever
+     the app opens; they last a week. Claude removes them when it files. */
+  var LINK_SECONDS = 60 * 60 * 24 * 7, LINK_REFRESH_MS = 1000 * 60 * 60 * 24 * 3, preparing = false;
+  function prepareFilingLinks() {
+    if (preparing || !cache.receipts) return;
+    var now = Date.now(), todo = [];
+    cache.receipts.forEach(function (d, id) {
+      if (d.filedAt) return;
+      var ids = (d.assetIds && d.assetIds.length) ? d.assetIds : (d.assetId ? [d.assetId] : []);
+      if (!ids.length) return;
+      var at = d.fileLinksAt ? Date.parse(d.fileLinksAt) : 0;
+      if (now - at > LINK_REFRESH_MS) todo.push({ id: id, ids: ids });
+    });
+    if (!todo.length) return;
+    preparing = true;
+    var chain = Promise.resolve();
+    todo.forEach(function (t) {
+      chain = chain.then(function () {
+        return client.storage.from(CFG.bucket).createSignedUrls(t.ids.map(pathFor), LINK_SECONDS)
+          .then(function (r) {
+            var links = (r.data || []).map(function (x) { return x && x.signedUrl; }).filter(Boolean);
+            if (links.length !== t.ids.length) return;
+            return docRef('receipts', t.id).update({ fileLinks: links, fileLinksAt: new Date().toISOString() });
+          }).catch(function () {});
+      });
+    });
+    chain.then(function () { preparing = false; }, function () { preparing = false; });
   }
   function refreshAll() {
     Object.keys(starting).forEach(function (n) { if (starting[n]) refresh(n).catch(function () {}); });
