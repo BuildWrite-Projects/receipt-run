@@ -2696,7 +2696,9 @@ function renderTotals(){
       /* A prospect in Job Book isn't expected to have receipts yet, so its
          quiet spells aren't worth a warning. */
       if(j.bookStatus === "prospect" || j.bookStatus === ""){
-        sub = n ? (n + (n===1 ? " receipt" : " receipts") + " · prospect") : "prospect · nothing filed yet";
+        sub = n ? (n + (n===1 ? " receipt" : " receipts") + " · prospect")
+            : last ? ("prospect · nothing " + spanWord() + " · last was " + monthLabel(last))
+            : "prospect · nothing filed yet";
       }
       else if(!n && !last){ sub = "nothing ever filed to this job"; flag = true; gaps.push("Nothing has ever been filed to " + j.name); }
       else if(!n){ sub = "nothing " + spanWord() + " · last was " + monthLabel(last); flag = true; gaps.push("No receipts on " + j.name + " " + spanWord()); }
