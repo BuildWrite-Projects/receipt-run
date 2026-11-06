@@ -18,7 +18,7 @@
   document.addEventListener('DOMContentLoaded', function () {
     var bar = document.querySelector('.topbar');
     if (bar && window.BWFeedback) BWFeedback.mount({ app: 'receipt-run', into: bar, before: document.getElementById('netchip'),
-      client: function () { return window.RR_client && RR_client(); }, version: '2026-11-05' });
+      client: function () { return window.RR_client && RR_client(); }, version: '2026-11-06' });
   });
 </script>
 </head><body>
@@ -1451,7 +1451,9 @@ var ITEM_RULES =
   "items — one entry per purchased line, in printed order:\n" +
   "- text: the description EXACTLY as printed, abbreviations and misspellings kept. Never expand, correct or tidy it.\n" +
   "- code: the UPC or SKU printed beside that line, digits only, or null.\n" +
-  "- price: the extended price for that line (what it added to the bill), plain number, or null.\n" +
+  "- price: the extended price for that line (what it added to the bill), plain number, or null. " +
+  "A returned or refunded line took money OFF the bill, so its price is NEGATIVE (-12.47), however the store prints it " +
+  '(a trailing minus "12.47-", "CR", parentheses, or under a RETURN heading).\n' +
   "- Leave out subtotal, tax, total, change, tender, card, savings and store-message lines. Those are not items.\n" +
   "- clear: true only if the printed text by itself would tell the shopper what the product actually is six months from now. " +
   'An abbreviation ("CG TP TTL 2P"), a bare code, or a word too vague to identify the thing ("ORGANIZER", "MISC HARDWARE") is false.\n' +
@@ -1469,17 +1471,29 @@ var BOUGHT_RULE =
   '"Insulation + misc. supplies", "Treated lumber + screen door", "Concrete mix + anchor bolts", "Framing nails". ' +
   'For fuel say "Fuel". null if the items cannot be read.\n';
 
+/* Returns. Feedback 2026-11-06: a return had to be scanned twice before it
+   came back negative. "The final amount charged" never told the reader what a
+   refund is, so the sign was a coin flip. A return is money back, so its total
+   is negative, and the SUMIFS on the estimates and the expense tracker then
+   subtract it on their own. */
+var RETURN_RULE =
+  '- isReturn: true if this is a return, refund, exchange credit or store credit — look for words like ' +
+  'RETURN, REFUND, CREDIT, "REFUND TO CARD", or a negative or trailing-minus total ("12.47-"). Otherwise false.\n' +
+  "- When isReturn is true, total and tax are NEGATIVE numbers (money back), e.g. -12.47. " +
+  "On an exchange that nets out, use the signed net figure the receipt prints.\n";
+
 var OCR_PROMPT =
   "This is a photo of a purchase receipt from a store, taken by a construction project manager. " +
   "Read only what is actually printed on it. Do not guess or fill in anything that is not legible.\n\n" +
   "Reply with ONLY a JSON object, no other text, in exactly this shape:\n" +
   '{"vendor": string|null, "date": "YYYY-MM-DD"|null, "total": number|null, "tax": number|null, ' +
-  '"receiptNo": string|null, "cardLast4": string|null, "confidence": "high"|"low", "unreadable": boolean, "problem": string|null, ' +
+  '"receiptNo": string|null, "cardLast4": string|null, "isReturn": boolean, "confidence": "high"|"low", "unreadable": boolean, "problem": string|null, ' +
   '"items": [{"text": string, "code": string|null, "price": number|null, "clear": boolean, "guess": string|null}]}\n\n' +
   "Rules:\n" +
   "- vendor: the store name as printed (Lowe's, The Home Depot, Ace Hardware, a lumber yard, a gas station).\n" +
   "- total: the final amount charged, as a plain number with no currency symbol. If subtotal and total both appear, take the total.\n" +
   "- tax: sales tax only, if printed. null otherwise.\n" +
+  RETURN_RULE +
   "- Any field you cannot read clearly must be null. A null is correct; a guess is not.\n" +
   '- confidence is "low" if the image is blurry, cut off, badly lit, or you are unsure of vendor or total.\n' +
   "- unreadable is true only if this is not a legible receipt at all.\n" +
@@ -1502,7 +1516,7 @@ var DOC_PROMPT =
   '{"docType": "receipt"|"invoice", "vendor": string|null, "date": "YYYY-MM-DD"|null, ' +
   '"total": number|null, "tax": number|null, "receiptNo": string|null, "invoiceNo": string|null, ' +
   '"jobCode": string|null, "shipTo": string|null, "terms": string|null, "dueDate": "YYYY-MM-DD"|null, ' +
-  '"pageLabel": string|null, "cardLast4": string|null, "confidence": "high"|"low", ' +
+  '"pageLabel": string|null, "cardLast4": string|null, "isReturn": boolean, "confidence": "high"|"low", ' +
   '"unreadable": boolean, "problem": string|null, "bought": string|null, ' +
   '"items": [{"text": string, "code": string|null, "price": number|null, "clear": boolean, "guess": string|null}]}\n\n' +
   "Rules:\n" +
@@ -1513,6 +1527,7 @@ var DOC_PROMPT =
   "- total: the single final amount for the whole document, plain number, no currency symbol. " +
   "On a multi-page document this is the total on the LAST page, not a per-page subtotal.\n" +
   "- tax: sales tax only. null otherwise.\n" +
+  RETURN_RULE +
   "- invoiceNo: the invoice number, for an invoice. receiptNo: the receipt or transaction number, " +
   "for a receipt. Fill the one that applies and leave the other null.\n" +
   '- jobCode: the job, order or cost-code reference the supplier prints for this delivery ' +
@@ -1656,6 +1671,18 @@ function looksCryptic(text){
   }
   return !(wordy >= 2 || longest >= 6);
 }
+/* A money figure as the reader or a person might write it. Stores print a
+   refund several ways -- "-12.47", "12.47-", "(12.47)", "12.47 CR" -- and the
+   old cleaner kept only digits and a LEADING minus, so "12.47-" came out +12.47. */
+function signedMoney(v){
+  if(v==null || v==="") return null;
+  if(typeof v === "number") return isFinite(v) ? v : null;
+  var t = String(v).trim();
+  var neg = /^-|-\s*$|^\(.*\)$|\bCR\b/i.test(t);
+  var n = parseFloat(t.replace(/[^0-9.]/g,""));
+  if(isNaN(n)) return null;
+  return neg ? -n : n;
+}
 function cleanItems(raw){
   if(!raw || !raw.length) return [];
   var out = [];
@@ -1664,8 +1691,7 @@ function cleanItems(raw){
     var text = it.text==null ? "" : String(it.text).slice(0,60).trim();
     if(!text) continue;
     if(/^(sub\s*total|subtotal|total|tax|change|tender|cash|debit|credit|balance|savings|you saved|visa|mastercard|amex|discover)\b/i.test(text)) continue;
-    var price = it.price==null ? null : parseFloat(String(it.price).replace(/[^0-9.\-]/g,""));
-    if(price!=null && isNaN(price)) price = null;
+    var price = signedMoney(it.price);
     var clear = typeof it.clear === "boolean" ? it.clear : !looksCryptic(text);
     out.push({
       text: text,
@@ -1754,16 +1780,17 @@ function runOcr(id, blob, dest){
   var imgs = [blob].concat((dest && dest.morePages) || []);
   S.sample.json(DOC_PROMPT, { images:imgs, modelTier:"default" }).then(function(r){
     if(!r || typeof r !== "object") throw new Error("shape");
-    var num = function(v){
-      if(v==null) return null;
-      var n = typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.\-]/g,""));
-      return isNaN(n) ? null : n;
-    };
+    var num = signedMoney;
+    /* belt and braces: if the reader says it's a return but forgot the sign,
+       the money still goes back the right way */
+    var isReturn = r.isReturn === true;
+    var back = function(n){ return (isReturn && n!=null && n>0) ? -n : n; };
     var ocr = {
       vendor: r.vendor ? String(r.vendor).slice(0,80) : null,
       date: /^\d{4}-\d{2}-\d{2}$/.test(r.date||"") ? r.date : null,
-      total: num(r.total),
-      tax: num(r.tax),
+      total: back(num(r.total)),
+      tax: back(num(r.tax)),
+      isReturn: isReturn || (num(r.total)!=null && num(r.total) < 0),
       receiptNo: r.receiptNo ? String(r.receiptNo).slice(0,40) : null,
       cardLast4: r.cardLast4 ? String(r.cardLast4).replace(/\D/g,"").slice(-4) : null,
       confidence: r.confidence === "high" ? "high" : "low",
@@ -1779,6 +1806,12 @@ function runOcr(id, blob, dest){
       bought: r.bought ? String(r.bought).trim().slice(0,60) : null
     };
     var items = cleanItems(r.items);
+    /* a straight return with every line still positive: flip them so the lines
+       add up to the (negative) total. Mixed signs = an exchange; leave as read. */
+    if(ocr.isReturn && ocr.total < 0 && items.length &&
+       items.every(function(it){ return it.price==null || it.price > 0; })){
+      items.forEach(function(it){ if(it.price!=null) it.price = -it.price; });
+    }
     applyAliases(items);
     var shaky = ocr.unreadable || ocr.confidence !== "high" || ocr.total == null || !ocr.vendor;
     var patch = {
@@ -3020,7 +3053,7 @@ function allocate(items, total){
   });
   var cats = Object.keys(by);
   if(!cats.length || Math.abs(base) < 0.005) return [];
-  var target = (total != null && total > 0) ? total : base;
+  var target = (total != null && Math.abs(total) >= 0.005) ? total : base;   // a return's total is negative
   var out = cats.map(function(c){
     return { category:c, lines:by[c], amount: Math.round(target * (by[c] / base) * 100) / 100 };
   });
@@ -3440,7 +3473,7 @@ function openDetail(r){
 
   var save = el("button","btn", r.status==="review" ? "Looks right — clear it" : "Save changes");
   save.onclick = function(){
-    var num = function(v){ var n = parseFloat(String(v).replace(/[^0-9.\-]/g,"")); return isNaN(n)?null:n; };
+    var num = signedMoney;
     var jv = sel.value, patch = {
       vendor: f.vendor.value.trim() || null,
       date: f.date.value || null,
