@@ -1451,6 +1451,15 @@ var ITEM_RULES =
   "If you would only be guessing wildly, use null. Never put a guess in text.\n" +
   "- If the item lines are not legible, use an empty array.";
 
+/* Joe, who keeps the books, wants a glance at what a receipt was for. One
+   plain phrase: the biggest-dollar item, plus the next one if it matters. */
+var BOUGHT_RULE =
+  '- bought: what was mainly bought, in plain words a bookkeeper would recognise, 2 to 5 words. ' +
+  'Name the item with the largest price. If a second item is also a sizeable share of the total, add it with " + ", ' +
+  'otherwise, if there are other items, add " + misc." Use the general kind of thing, not brand or pack size: ' +
+  '"Insulation + misc. supplies", "Treated lumber + screen door", "Concrete mix + anchor bolts", "Framing nails". ' +
+  'For fuel say "Fuel". null if the items cannot be read.\n';
+
 var OCR_PROMPT =
   "This is a photo of a purchase receipt from a store, taken by a construction project manager. " +
   "Read only what is actually printed on it. Do not guess or fill in anything that is not legible.\n\n" +
@@ -1485,9 +1494,10 @@ var DOC_PROMPT =
   '"total": number|null, "tax": number|null, "receiptNo": string|null, "invoiceNo": string|null, ' +
   '"jobCode": string|null, "shipTo": string|null, "terms": string|null, "dueDate": "YYYY-MM-DD"|null, ' +
   '"pageLabel": string|null, "cardLast4": string|null, "confidence": "high"|"low", ' +
-  '"unreadable": boolean, "problem": string|null, ' +
+  '"unreadable": boolean, "problem": string|null, "bought": string|null, ' +
   '"items": [{"text": string, "code": string|null, "price": number|null, "clear": boolean, "guess": string|null}]}\n\n' +
   "Rules:\n" +
+  BOUGHT_RULE +
   '- docType: "invoice" if the document is headed INVOICE, bills to an account, or shows ' +
   'payment terms or a due date. "receipt" if it records a completed sale at a till.\n' +
   "- vendor: the business name as printed (Lowe's, The Home Depot, Builders FirstSource, a gas station).\n" +
@@ -1672,6 +1682,24 @@ function applyAliases(items){
   return open;
 }
 function itemLabel(it){ return (it && (it.name || it.text)) || ""; }
+/* "What we bought" for Joe's receipt pages: what Stephen typed or the reader
+   wrote when it was scanned, else the biggest-dollar line (plus the next one
+   if it is a real share of the bill). */
+function boughtOf(r){
+  if(r && r.bought) return r.bought;
+  var lines = ((r && r.items) || []).filter(function(x){ return x.price != null && itemLabel(x); })
+    .sort(function(a,b){ return b.price - a.price; });
+  if(!lines.length) return "";
+  var short = function(x){
+    var s = String(x.name || x.guess || x.text).split(/[,(]/)[0].trim();
+    return s.length > 30 ? s.slice(0,31).replace(/\s+\S*$/,"") : s;
+  };
+  var out = short(lines[0]);
+  var whole = (r && r.total) || itemsSum(lines) || 0;
+  if(lines[1] && whole && lines[1].price >= whole * 0.2) out += " + " + short(lines[1]);
+  else if(lines.length > 1) out += " + misc.";
+  return out;
+}
 function openNameCount(items){
   var n = 0;
   (items||[]).forEach(function(it){ if(!it.name && !it.clear) n++; });
@@ -1735,7 +1763,8 @@ function runOcr(id, blob, dest){
       shipTo: r.shipTo ? String(r.shipTo).slice(0,160) : null,
       terms: r.terms ? String(r.terms).slice(0,40) : null,
       dueDate: /^\d{4}-\d{2}-\d{2}$/.test(r.dueDate||"") ? r.dueDate : null,
-      pageLabel: r.pageLabel ? String(r.pageLabel).slice(0,24) : null
+      pageLabel: r.pageLabel ? String(r.pageLabel).slice(0,24) : null,
+      bought: r.bought ? String(r.bought).trim().slice(0,60) : null
     };
     var items = cleanItems(r.items);
     applyAliases(items);
@@ -1754,6 +1783,7 @@ function runOcr(id, blob, dest){
       dueDate: ocr.dueDate,
       items: items,
       openNames: openNameCount(items),
+      bought: ocr.bought,
       status: shaky ? "review" : "ok",
       reviewReason: shaky ? (ocr.problem || (ocr.total==null ? "Couldn't read the total" : "Not a confident read")) : null
     };
@@ -2496,6 +2526,8 @@ function receiptRow(r, matchedItems){
   if(r.status==="reading") sub.appendChild(el("span","tag reading","reading"));
   if(r.openDivision) sub.appendChild(el("span","tag review","no division"));
   else if(r.division) sub.appendChild(el("span","tag split", r.division.length > 22 ? (r.division.slice(0,21) + "…") : r.division));
+  var bt = r.kind !== "buildwrite" ? boughtOf(r) : "";
+  if(bt) sub.appendChild(el("span",null, bt.length > 30 ? (bt.slice(0,29) + "…") : bt));
   if(r.docType === "invoice") sub.appendChild(el("span","tag inv",
     r.invoiceNo ? ("invoice " + r.invoiceNo) : "invoice"));
   if(isFiled(r)) sub.appendChild(el("span","tag filed","filed " + shortDate(String(r.filedAt).slice(0,10))));
@@ -3267,6 +3299,13 @@ function openDetail(r){
       rememberCard = { box:cb, last4:c4 };
     }
   }
+  /* What it was for, at a glance -- printed on Joe's receipt pages. */
+  var lb = el("label","fld"); lb.appendChild(el("span","cap","Bought (for Joe's pages)"));
+  var ib = el("input","inp"); ib.id = "d-bought"; ib.maxLength = 60;
+  ib.placeholder = "e.g. Insulation + misc. supplies";
+  ib.value = boughtOf(r);
+  lb.appendChild(ib); body.appendChild(lb);
+
   var ln = el("label","fld"); ln.appendChild(el("span","cap","Note"));
   var ta = el("textarea","inp"); ta.id="d-note"; ta.placeholder="Add a note (optional)"; ta.value = r.note || "";
   ln.appendChild(ta); body.appendChild(ln);
@@ -3387,6 +3426,7 @@ function openDetail(r){
       receiptNo: f.receiptNo.value.trim() || null,
       method: f.method.value,
       note: ta.value.trim(),
+      bought: ib.value.trim() || null,
       editedByUser: true,
       status: "ok", reviewReason: null, dupOf: null
     };
