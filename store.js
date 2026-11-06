@@ -143,7 +143,10 @@
         folder: d.folder || null,
         archived: !!d.archived,
         bookJobId: row.id,
-        bookStatus: d.status || ''
+        bookStatus: d.status || '',
+        code: d.code || null,                 // receipt numbers for Joe: CARP-014
+        receiptNoLast: d.receiptNoLast || 0,
+        joePageLast: d.joePageLast || 0
       }));
     });
     own.forEach(function (d, id) {

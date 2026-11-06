@@ -2530,6 +2530,7 @@ function receiptRow(r, matchedItems){
   if(bt) sub.appendChild(el("span",null, bt.length > 30 ? (bt.slice(0,29) + "…") : bt));
   if(r.docType === "invoice") sub.appendChild(el("span","tag inv",
     r.invoiceNo ? ("invoice " + r.invoiceNo) : "invoice"));
+  if(r.rcptNo) sub.appendChild(el("span","tag filed", r.rcptNo + (r.joePage ? " · p" + r.joePage : "")));
   if(isFiled(r)) sub.appendChild(el("span","tag filed","filed " + shortDate(String(r.filedAt).slice(0,10))));
   if(r.openNames) sub.appendChild(el("span","tag name", r.openNames + " to name"));
   if(r.splits && r.splits.length) sub.appendChild(el("span","tag split", r.splits.length + "-way split"));
@@ -3299,6 +3300,11 @@ function openDetail(r){
       rememberCard = { box:cb, last4:c4 };
     }
   }
+  if(r.rcptNo){
+    var rn = el("p","notice flat"); rn.style.margin = "0 0 4px";
+    rn.textContent = "Receipt " + r.rcptNo + (r.joePage ? " — on page " + r.joePage + " of Joe's pages" + (r.joePdf ? " (" + r.joePdf + ")" : "") : " — not on Joe's pages yet");
+    body.appendChild(rn);
+  }
   /* What it was for, at a glance -- printed on Joe's receipt pages. */
   var lb = el("label","fld"); lb.appendChild(el("span","cap","Bought (for Joe's pages)"));
   var ib = el("input","inp"); ib.id = "d-bought"; ib.maxLength = 60;
@@ -3767,7 +3773,8 @@ function receiptFileNames(jobName, rows){
       var cents = Math.round(r.total * 100).toString();
       k = k.replace(/_(\d{6})$/, " " + cents.slice(-4) + "_$1");
     }
-    out[r.id] = k + ".jpg";
+    /* the receipt's number for Joe goes first, so the folder sorts in number order */
+    out[r.id] = (r.rcptNo ? r.rcptNo + " " : "") + k + ".jpg";
   });
   return out;
 }
@@ -3852,6 +3859,41 @@ function saveFile(name, data){
    image files named the way that tab's "Receipt File" column expects. */
 function groupNames(g){
   return receiptFileNames(g.name, g.rows);
+}
+/* ---- Joe's receipt pages ----
+   Joe keeps the books. Every job receipt gets a number -- the job's code and
+   a running count, CARP-014 -- that is printed on his pages, starts the image
+   name and the Receipt File cell, and shows here. Numbers are given in date
+   order (capture time breaks a tie) to receipts that don't have one yet, and
+   are never reused. code and lastNo come from the job in Job Book
+   (job.code, job.receiptNoLast). Sets r.rcptNo on the rows it numbers, so
+   call this before groupNames. */
+function assignJoeNumbers(code, lastNo, rows){
+  var n = lastNo || 0, out = {};
+  if(!code) return { numbers: out, last: n };
+  rows.filter(function(r){ return !r.rcptNo; })
+    .sort(function(a,b){
+      var x = String(a.date || "") + String(a.capturedAt || ""), y = String(b.date || "") + String(b.capturedAt || "");
+      return x < y ? -1 : x > y ? 1 : 0;
+    })
+    .forEach(function(r){
+      n++;
+      r.rcptNo = String(code).toUpperCase() + "-" + ("00" + n).slice(-Math.max(3, String(n).length));
+      out[r.id] = r.rcptNo;
+    });
+  return { numbers: out, last: n };
+}
+/* The rows for Joe's next pages: every numbered receipt in the group not yet
+   on a page, in number order, with what goes on its label. image is the file
+   name groupNames gave it (page 1 of the receipt). */
+function joeRows(g, names){
+  return g.rows.filter(function(r){ return r.rcptNo && !r.joePage; })
+    .sort(function(a,b){ return a.rcptNo < b.rcptNo ? -1 : a.rcptNo > b.rcptNo ? 1 : 0; })
+    .map(function(r){
+      return { id: r.id, num: r.rcptNo, job: g.name, division: r.division || "",
+               bought: boughtOf(r), vendor: r.vendor || "", date: r.date || String(r.capturedAt || "").slice(0,10),
+               amount: r.total, image: names[r.id] };
+    });
 }
 function csvFor(g, names){
   if(g.jobId === "buildwrite") return buildExpenseLogCsv(g, names);
