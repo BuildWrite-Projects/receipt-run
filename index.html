@@ -12,6 +12,15 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
 <script src="store.js"></script>
+<script src="feedback.js"></script>
+<script>
+  /* Feedback button in the top bar, before the status chips */
+  document.addEventListener('DOMContentLoaded', function () {
+    var bar = document.querySelector('.topbar');
+    if (bar && window.BWFeedback) BWFeedback.mount({ app: 'receipt-run', into: bar, before: document.getElementById('netchip'),
+      client: function () { return window.RR_client && RR_client(); }, version: '2026-11-05' });
+  });
+</script>
 </head><body>
 <title>Receipt Run</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
