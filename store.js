@@ -124,10 +124,24 @@
      job it is. A Receipt Run job with no Job Book match is still shown, so
      nothing disappears. If Job Book can't be read, the app shows its own
      job records exactly as before. */
-  var JB_BOOK = 'ra';
+  /* The team's job book is the one marked takesJobs: Roberts & Associates
+     for Stephen's team, the first book of any new team. The database only
+     returns the signed-in person's own team's books. */
+  var JB_BOOK = null;
+  function teamBook() {
+    if (JB_BOOK) return Promise.resolve(JB_BOOK);
+    return client.from('jobbook_books').select('id,data').then(function (r) {
+      var pick = ((r && r.data) || []).filter(function (b) { return b.data && b.data.takesJobs; })[0];
+      JB_BOOK = pick ? pick.id : null;
+      return JB_BOOK;
+    }, function () { return null; });
+  }
   function fetchJobBookJobs() {
-    return client.from('jobbook_jobs').select('id,data').eq('book_id', JB_BOOK)
-      .then(function (r) { return r.error ? null : (r.data || []); }, function () { return null; });
+    return teamBook().then(function (book) {
+      if (!book) return null;
+      return client.from('jobbook_jobs').select('id,data').eq('book_id', book)
+        .then(function (r) { return r.error ? null : (r.data || []); }, function () { return null; });
+    });
   }
   function mergeJobs(own, jb) {
     if (!jb) return own;
@@ -298,11 +312,13 @@
              with no folder yet. Job Book then shows "Folder: not set" and
              Claude builds the folder when Stephen says "set up new jobs". If
              Job Book refuses the write, keep the old behaviour. */
-          var jbData = { name: d.name, bookId: JB_BOOK, status: 'prospect', archived: false,
-                         waiting: false, createdAt: d.createdAt || new Date().toISOString(),
-                         createdIn: 'Receipt Run' };
-          return client.from('jobbook_jobs').insert({ id: id, data: jbData })
-            .then(function (r) {
+          return teamBook().then(function (book) {
+            if (!book) return { error: { message: 'no job book' } };
+            var jbData = { name: d.name, bookId: book, status: 'prospect', archived: false,
+                           waiting: false, createdAt: d.createdAt || new Date().toISOString(),
+                           createdIn: 'Receipt Run' };
+            return client.from('jobbook_jobs').insert({ id: id, data: jbData });
+          }).then(function (r) {
               if (r.error) return saveOwn();
               refreshJobsSoon();
             }, saveOwn);
@@ -500,7 +516,8 @@
   function signInSheet(done) {
     var box = sheet(
       '<div id="rrtitle" style="' + TITLE + '">Sign in to Receipt Run</div>' +
-      '<div style="font-size:13px;line-height:1.5;color:var(--muted,#99A2B1)">Same email and password as Job Book and Field Measure.</div>' +
+      '<div style="font-size:13px;line-height:1.5;color:var(--muted,#99A2B1)">Same email and password as Job Book and Field Measure. ' +
+      'New here? Create your account in <a href="../job-book/" style="color:inherit">Job Book</a> first.</div>' +
       '<input id="rrem" type="email" inputmode="email" autocomplete="username" autocapitalize="none" autocorrect="off" placeholder="you@example.com" style="' + FIELD + '">' +
       '<input id="rrpw" type="password" autocomplete="current-password" placeholder="password" style="' + FIELD + '">' +
       '<div id="rrmsg" style="font-size:13px;line-height:1.45;min-height:18px;color:var(--muted,#99A2B1)"></div>' +
@@ -525,6 +542,23 @@
     pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
   }
 
+  /* Which team this person is on (window.RR_team). No team yet = a new
+     account: point them at Job Book, where a team is set up. */
+  function teamCheck() {
+    return client.rpc('my_team_status').then(function (r) {
+      var st = (r && r.data) || {};
+      window.RR_team = st.team || null;
+      if (st.team) return;
+      var box = sheet('<div style="' + TITLE + '">' + (st.invite ? 'Set up your team first' : 'No invite yet') + '</div>' +
+        '<div style="font-size:14px;line-height:1.5">' + (st.invite
+          ? 'Open <b>Job Book</b> once and sign in there to name your team. Then come back here to scan receipts.'
+          : 'This email has no invite yet, so there’s nothing to show. Ask the person who shared the app to invite this email address.') + '</div>' +
+        '<a href="../job-book/" style="' + BTN + ';display:block;text-align:center;text-decoration:none">Open Job Book</a>' +
+        '<button id="rrntok" style="' + LINK + '">Not now</button>');
+      box.querySelector('#rrntok').onclick = function () { box.remove(); };
+    }, function () { window.RR_team = undefined; });
+  }
+
   function ready() {
     if (readyPromise) return readyPromise;
     readyPromise = new Promise(function (resolve, reject) {
@@ -540,8 +574,8 @@
       });
       client.auth.getSession().then(function (r) {
         var s = r && r.data && r.data.session;
-        if (s) { session = s; resolve(); }
-        else signInSheet(function (s2) { session = s2; resolve(); });
+        if (s) { session = s; teamCheck().then(resolve, resolve); }
+        else signInSheet(function (s2) { session = s2; teamCheck().then(resolve, resolve); });
       }, function (e) { reject(mapErr(e)); });
     });
     return readyPromise;

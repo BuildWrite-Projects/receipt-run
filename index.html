@@ -1691,6 +1691,9 @@ function applyAliases(items){
   return open;
 }
 function itemLabel(it){ return (it && (it.name || it.text)) || ""; }
+/* BuildWrite expenses (the tax side) are Stephen's own: shown for the
+   founding team, and whenever the team isn't known (offline, older data). */
+function bwOn(){ var t = window.RR_team; return !t || !!t.founding; }
 /* "What we bought" for Joe's receipt pages: what Stephen typed or the reader
    wrote when it was scanned, else the biggest-dollar line (plus the next one
    if it is a real share of the bill). */
@@ -2304,13 +2307,15 @@ function buildPickGrid(){
   }
   rest.forEach(function(j){ g.appendChild(jobButton(j,false)); });
 
-  g.appendChild(el("div","seclabel","Not a job"));
-  var bw = el("button","pick");
-  var ba = el("span","ja","BW"); bw.appendChild(ba);
-  bw.appendChild(el("span",null,"BuildWrite expense"));
-  bw.appendChild(el("span","arrow","›"));
-  bw.onclick = showCategories;
-  g.appendChild(bw);
+  if(bwOn()){
+    g.appendChild(el("div","seclabel","Not a job"));
+    var bw = el("button","pick");
+    var ba = el("span","ja","BW"); bw.appendChild(ba);
+    bw.appendChild(el("span",null,"BuildWrite expense"));
+    bw.appendChild(el("span","arrow","›"));
+    bw.onclick = showCategories;
+    g.appendChild(bw);
+  }
 
   var nb = el("button","pick ghost","+  New job");
   nb.onclick = function(){ $("sheet-newjob").hidden=false; $("nj-name").value=""; setTimeout(function(){ $("nj-name").focus(); },60); };
@@ -2800,9 +2805,12 @@ function renderTotals(){
     cats.forEach(function(c){ if(!lastCat[c] || t > lastCat[c]) lastCat[c] = t; });
   });
 
-  body.appendChild(el("div","grouphead")).appendChild(el("h2",null,"BuildWrite by category"));
   var shown = SPLIT_CATS.filter(function(c){ return (now[c] || 0) !== 0 || (ever[c] || 0) !== 0; });
-  if(!shown.length){
+  if(bwOn()) body.appendChild(el("div","grouphead")).appendChild(el("h2",null,"BuildWrite by category"));
+  if(!bwOn()){
+    /* BuildWrite's tax categories are Stephen's own business; other teams
+       file job receipts only. */
+  } else if(!shown.length){
     var e2 = el("div","empty");
     e2.appendChild(el("b",null,"Nothing filed to BuildWrite yet"));
     e2.appendChild(el("div",null,"Scan a receipt and send it to BuildWrite instead of a job — that's the tax side."));
@@ -3330,7 +3338,7 @@ function openDetail(r){
   S.jobs.filter(function(j){ return j.kind==="job" && !j.archived; }).forEach(function(j){
     var o = el("option",null,j.name); o.value = j.id; if(j.id===r.jobId) o.selected = true; sel.appendChild(o);
   });
-  BW_CATS.forEach(function(c){
+  (bwOn() || r.kind === "buildwrite" ? BW_CATS : []).forEach(function(c){
     var o = el("option",null,"BuildWrite — "+c); o.value = "bw::"+c;
     if(r.kind==="buildwrite" && r.category===c) o.selected = true;
     sel.appendChild(o);

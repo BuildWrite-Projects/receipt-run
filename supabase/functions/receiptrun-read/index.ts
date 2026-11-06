@@ -5,8 +5,10 @@
 // back the JSON the app expects. The Anthropic key lives only here, as the
 // ANTHROPIC_API_KEY secret — it never reaches the phone or GitHub.
 //
-// Only signed-in people on the Job Book members list may use it, so a stranger
-// who makes an account can't spend the credit.
+// Only signed-in people on a team may use it, so a stranger who makes an
+// account can't spend the credit. A team with a monthly cap (teams.
+// scan_cap_month; friends' teams start at 50, Stephen's has none) is told so
+// once it reaches it. Every read is logged in scan_log for the count.
 //
 // Body:
 //   { ping: true }                                  -> { ok, ready }
@@ -71,15 +73,27 @@ Deno.serve(async (req) => {
   const { data: who, error: whoErr } = await asUser.auth.getUser();
   if (whoErr || !who?.user) return fail(req, "not_granted", "Sign in first");
   const admin = createClient(url, service);
-  const { data: member } = await admin.from("jobbook_members").select("user_id")
-    .eq("user_id", who.user.id).maybeSingle();
-  if (!member) return fail(req, "not_granted", "This account is not on the members list");
+  const { data: membership } = await admin.from("team_members").select("team_id, teams(scan_cap_month)")
+    .eq("user_id", who.user.id).order("added_at").limit(1).maybeSingle();
+  if (!membership) return fail(req, "not_granted", "This account isn't on a team yet. Set one up in Job Book first.");
+  const teamId = (membership as any).team_id as string;
+  const cap = (membership as any).teams?.scan_cap_month as number | null;
 
   let body: any;
   try { body = await req.json(); } catch { return fail(req, "invalid_argument", "Bad request body"); }
 
   if (body?.ping) return reply(req, { ok: true, ready: apiKey.length > 0 });
   if (!apiKey) return fail(req, "not_granted", "Receipt reading has no API key yet");
+
+  // --- the monthly cap ---
+  if (cap != null) {
+    const monthStart = new Date(); monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0);
+    const { count } = await admin.from("scan_log").select("id", { count: "exact", head: true })
+      .eq("team_id", teamId).gte("at", monthStart.toISOString());
+    if ((count ?? 0) >= cap) {
+      return fail(req, "monthly_cap", `This team has used its ${cap} receipt reads for the month. You can still add receipts and type the details in.`);
+    }
+  }
 
   const prompt = typeof body?.prompt === "string" ? body.prompt : "";
   if (!prompt) return fail(req, "invalid_argument", "No instructions sent");
@@ -133,6 +147,8 @@ Deno.serve(async (req) => {
   const text = (out.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
   let result: any;
   try { result = pickJson(text); } catch { return fail(req, "read_failed", "Reply was not readable"); }
+
+  await admin.from("scan_log").insert({ team_id: teamId, user_id: who.user.id, pages: images.length });
 
   // A short line for checking quality and cost later — no line-item contents.
   console.log(JSON.stringify({
